@@ -29,8 +29,8 @@ const int kLDPC_iterations = 20;
 // Making this bigger seems to only cost memory, which I now allocate from the heap, so what the hell
 const int kMax_decoded_messages = 1000;
 
-const int kFreq_osr = 2; // Frequency oversampling rate (bin subdivision)
-const int kTime_osr = 2; // Time oversampling rate (symbol subdivision)
+int kFreq_osr = 2; // Frequency oversampling rate (bin subdivision)
+int kTime_osr = 2; // Time oversampling rate (symbol subdivision)
 static float hann_i(int i, int N)
 {
     float x = sinf((float)M_PI * i / N);
@@ -240,6 +240,19 @@ int mcompare(void const *a, void const *b){
   return 0;
 }
 
+char *hexify(char *buff, const uint8_t *bits, size_t len) {
+  char *obuff = buff;
+  while (len > 0) {
+    *buff++ = "0123456789abcdef"[bits[0] >> 4];
+    *buff++ = "0123456789abcdef"[bits[0] & 0x0f];
+    bits++;
+    len--;
+  }
+  *buff++ = '\0';
+
+  return obuff;
+}
+
 // Process a buffer already loaded from a file
 // Pass precise time of signal[0] (including fractional second) so we can reference to it
 int process_buffer(float const *signal,int sample_rate, int num_samples, bool is_ft8, float base_freq, struct tm const *tmp, double sec){
@@ -272,6 +285,8 @@ int process_buffer(float const *signal,int sample_rate, int num_samples, bool is
   int const candidate_size = (mon_cfg.f_max * kMax_candidates) / 3000; // Scale by bandwidth relative to the original 3 kHz
   candidate_t candidate_list[candidate_size];
   int num_candidates = ft8_find_sync(&mon.wf, candidate_size, candidate_list, kMin_score);
+
+  fprintf(stderr, "Candidates = %d (of %d)\n", num_candidates, candidate_size);
 
   // Hash table for decoded messages (to check for duplicates)
   int num_decoded = 0;
@@ -309,6 +324,9 @@ int process_buffer(float const *signal,int sample_rate, int num_samples, bool is
             }
 	  continue;
         }
+
+      fprintf(stderr, "time_sec=%f, offset=%d, time_sub=%d, time_osr=%d, symbol_period=%f\n",
+            time_sec, (int) cand->time_offset, (int)cand->time_sub, (int) mon.wf.time_osr, (float) mon.symbol_period);
 
       message.freq_hz = freq_hz; // Save so we can sort on it and display it
       message.time_sec = time_sec; // Time offset of start from nominal UTC :00/:15/:30/:45 or :00/:07.5/:15/...
@@ -357,10 +375,11 @@ int process_buffer(float const *signal,int sample_rate, int num_samples, bool is
 
   for(int i=0; i < num_decoded; i++){
     message_t const *mp = decoded_hashtable[i];
+    char hexbuffer[sizeof(mp->bits) * 2 + 1];
     if(mp == NULL)
       continue; // Shouldn't happen
 
-    fprintf(stdout,"%4d/%02d/%02d %02d:%02d:%02d %3d %+4.2lf %'.1lf ~ %s\n",
+    fprintf(stdout,"%4d/%02d/%02d %02d:%02d:%02d %3d %+4.2lf %'.1lf ~ %s  #%s\n",
 	    tmp->tm_year + 1900,
 	    tmp->tm_mon + 1,
 	    tmp->tm_mday,
@@ -370,7 +389,8 @@ int process_buffer(float const *signal,int sample_rate, int num_samples, bool is
 	    mp->score,
 	    tbase + mp->time_sec,
 	    1.0e6 * base_freq + mp->freq_hz,
-	    mp->text);
+	    mp->text,
+            hexify(hexbuffer, mp->bits, sizeof(mp->bits)));
   }
   free(decoded);
   free(decoded_hashtable);

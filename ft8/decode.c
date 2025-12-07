@@ -5,6 +5,7 @@
 #include "unpack.h"
 
 #include <stdbool.h>
+#include <string.h>
 #include <math.h>
 
 /// Compute log likelihood log(p(1) / p(0)) of 174 message bits for later use in soft-decision LDPC decoding
@@ -362,6 +363,7 @@ bool ft8_decode(const waterfall_t* wf, const candidate_t* cand, message_t* messa
         }
     }
 
+    memcpy(message->bits, a91, sizeof(message->bits));
     status->unpack_status = unpack77(a91, message->text);
 
     if (status->unpack_status < 0)
