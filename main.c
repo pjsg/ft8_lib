@@ -76,8 +76,9 @@ int main(int argc, char *argv[]){
   // hhmmss is hour, minute, second UTC
   // ffffffffff is frequency in *hertz*
   double base_freq = 0;
+  int nprocs = 1;
   int c;
-  while((c = getopt(argc,argv,"48f:vnrT:F:")) != -1){
+  while((c = getopt(argc,argv,"48f:vnrT:F:p:")) != -1){
     switch(c){
     case 'r':
       Run_queue = true;
@@ -102,6 +103,9 @@ int main(int argc, char *argv[]){
       break;
     case 'T':
       kTime_osr = atoi(optarg);
+      break;
+    case 'p':
+      nprocs = atoi(optarg);
       break;
     }
   }
@@ -131,6 +135,17 @@ int main(int argc, char *argv[]){
       exit(1);
     }
   }
+  while (nprocs-- > 1) {
+    int pid = fork();
+    if (pid < 0) {
+      fprintf(stderr,"Failed to fork: %s\n", strerror(errno));
+      exit(1);
+    }
+    if (pid == 0) {
+      break;
+    }
+  }
+  
 #ifdef __linux__ // inotify is linux-only; non-linux will run simple timer-based directory scan below
   extern int Watches;
 
@@ -773,5 +788,5 @@ done:;
 
 void usage()
 {
-  fprintf(stderr, "decode_ft8 [-F sub] [-T sub] [-v] [-8|-4] [-d] [-f basefreq] file_or_directory\n");
+  fprintf(stderr, "decode_ft8 [-F sub] [-T sub] [-p nprocs] [-v] [-8|-4] [-d] [-f basefreq] file_or_directory\n");
 }
