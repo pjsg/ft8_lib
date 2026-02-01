@@ -1,8 +1,6 @@
 CFLAGS = -O3 -ggdb3 -march=native -flto -ffast-math
-CFLAGS = -O3 -march=native -flto -ffast-math -Rpass=loop-vectorize -Rpass-analysis=loop-vectorize
-CPPFLAGS = -std=c11 -I.
-CC=clang
-LDFLAGS = -latomic -lbsd -lm -flto -Rpass=loop-vectorize
+CPPFLAGS = -std=c11 -I. $(shell pkg-config --cflags fftw3f)
+LDFLAGS = -latomic -lbsd -lm -flto $(shell pkg-config --libs fftw3f)
 
 TARGETS = gen_ft8 decode_ft8 test
 
@@ -16,10 +14,10 @@ run_tests: test
 gen_ft8: gen_ft8.o ft8/constants.o ft8/text.o ft8/pack.o ft8/encode.o ft8/crc.o common/wave.o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
-test:  test.o ft8/pack.o ft8/encode.o ft8/crc.o ft8/text.o ft8/constants.o fft/kiss_fftr.o fft/kiss_fft.o
+test:  test.o ft8/pack.o ft8/encode.o ft8/crc.o ft8/text.o ft8/constants.o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
-decode_ft8: main.o decode_ft8.o fft/kiss_fftr.o fft/kiss_fft.o ft8/decode.o ft8/encode.o ft8/crc.o ft8/ldpc.o ft8/unpack.o ft8/text.o ft8/constants.o common/wave.o
+decode_ft8: main.o decode_ft8.o ft8/decode.o ft8/encode.o ft8/crc.o ft8/ldpc.o ft8/unpack.o ft8/text.o ft8/constants.o common/wave.o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
 clean:

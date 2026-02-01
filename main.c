@@ -69,6 +69,7 @@ void usage();
 int main(int argc, char *argv[]){
   const char* path = NULL;
   bool is_ft8 = true;
+  kTime_osr = 16;
 
   // Base freq; if not specified with -f in megahertz, extracted from input filename of form
   // yyyymmddThhmmssZ_ffffffff_usb.wav
@@ -91,9 +92,11 @@ int main(int argc, char *argv[]){
       break;
     case '8':
       is_ft8 = true; // In case it's not the default
+      kTime_osr = 16;
       break;
     case '4': // Decode FT4; default is FT8
       is_ft8 = false;
+      kTime_osr = 5;
       break;
     case 'f': // Base frequency in Megahertz, otherwise extracted from file name
       base_freq = strtod(optarg,NULL);

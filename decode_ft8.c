@@ -16,8 +16,7 @@
 
 #include "common/debug.h"
 #include "common/wave.h"
-#include "fft/kiss_fft.h"
-#include "fft/kiss_fftr.h"
+#include <fftw3.h>
 
 #define LOG_LEVEL LOG_FATAL
 
@@ -32,7 +31,7 @@ const int kLDPC_iterations = 20;
 const int kMax_decoded_messages = 1000;
 
 int kFreq_osr = 2; // Frequency oversampling rate (bin subdivision)
-int kTime_osr = 2; // Time oversampling rate (symbol subdivision)
+int kTime_osr = 0; // Time oversampling rate (symbol subdivision) 0 = auto
 static float hann_i(int i, int N) {
   float x = sinf((float)M_PI * i / N);
   return x * x;
@@ -56,6 +55,27 @@ static float blackman_i(int i, int N) {
   float x2 = 2 * x1 * x1 - 1; // Use double angle formula
 
   return a0 - a1 * x1 + a2 * x2;
+}
+
+static uint8_t log_lut[65536];
+static float db_lut[65536];
+static bool log_lut_initialized = false;
+
+static void log_lut_init(void) {
+  if (log_lut_initialized)
+    return;
+  for (int i = 0; i < 65536; ++i) {
+    union {
+      uint32_t u;
+      float f;
+    } v;
+    v.u = (uint32_t)i << 15;
+    float db = 10.0f * log10f(1E-12f + v.f);
+    int scaled = (int)(2 * db + 240);
+    log_lut[i] = (scaled < 0) ? 0 : ((scaled > 255) ? 255 : scaled);
+    db_lut[i] = db;
+  }
+  log_lut_initialized = true;
 }
 
 void waterfall_init(waterfall_t *me, int max_blocks, int num_bins, int time_osr,
@@ -97,9 +117,10 @@ typedef struct {
   waterfall_t wf;      ///< Waterfall object
   float max_mag;       ///< Maximum detected magnitude (debug stats)
 
-  // KISS FFT housekeeping variables
-  void *fft_work;        ///< Work area required by Kiss FFT
-  kiss_fftr_cfg fft_cfg; ///< Kiss FFT housekeeping object
+  // FFTW3 housekeeping variables
+  float *fft_in;          ///< Input buffer for FFTW
+  fftwf_complex *fft_out; ///< Output buffer for FFTW
+  fftwf_plan fft_plan;    ///< FFTW plan
 } monitor_t;
 
 void monitor_init(monitor_t *me, const monitor_config_t *cfg) {
@@ -126,16 +147,20 @@ void monitor_init(monitor_t *me, const monitor_config_t *cfg) {
   }
   me->last_frame = (float *)malloc(me->nfft * sizeof(me->last_frame[0]));
 
-  size_t fft_work_size;
-  kiss_fftr_alloc(me->nfft, 0, 0, &fft_work_size);
-
   LOG(LOG_INFO, "Block size = %d\n", me->block_size);
   LOG(LOG_INFO, "Subblock size = %d\n", me->subblock_size);
   LOG(LOG_INFO, "N_FFT = %d\n", me->nfft);
-  LOG(LOG_DEBUG, "FFT work area = %zu\n", fft_work_size);
 
-  me->fft_work = malloc(fft_work_size);
-  me->fft_cfg = kiss_fftr_alloc(me->nfft, 0, me->fft_work, &fft_work_size);
+  me->fft_in = (float *)fftwf_malloc(sizeof(float) * me->nfft);
+  me->fft_out =
+      (fftwf_complex *)fftwf_malloc(sizeof(fftwf_complex) * (me->nfft / 2 + 1));
+
+  fftwf_import_wisdom_from_filename(".ft8_fftw_wisdom");
+  me->fft_plan =
+      fftwf_plan_dft_r2c_1d(me->nfft, me->fft_in, me->fft_out, FFTW_MEASURE);
+  fftwf_export_wisdom_to_filename(".ft8_fftw_wisdom");
+
+  log_lut_init();
 
   const int max_blocks = (int)(slot_time / symbol_period);
   const int num_bins = (int)(cfg->sample_rate * symbol_period / 2);
@@ -148,7 +173,9 @@ void monitor_init(monitor_t *me, const monitor_config_t *cfg) {
 
 void monitor_free(monitor_t *me) {
   waterfall_free(&me->wf);
-  free(me->fft_work);
+  fftwf_destroy_plan(me->fft_plan);
+  fftwf_free(me->fft_in);
+  fftwf_free(me->fft_out);
   free(me->last_frame);
   free(me->window);
 }
@@ -165,9 +192,6 @@ void monitor_process(monitor_t *me, const float *frame) {
 
   // Loop over block subdivisions
   for (int time_sub = 0; time_sub < me->wf.time_osr; ++time_sub) {
-    kiss_fft_scalar timedata[me->nfft];
-    kiss_fft_cpx freqdata[me->nfft / 2 + 1];
-
     // Shift the new data into analysis frame
     for (int pos = 0; pos < me->nfft - me->subblock_size; ++pos) {
       me->last_frame[pos] = me->last_frame[pos + me->subblock_size];
@@ -179,25 +203,27 @@ void monitor_process(monitor_t *me, const float *frame) {
 
     // Compute windowed analysis frame
     for (int pos = 0; pos < me->nfft; ++pos) {
-      timedata[pos] = me->fft_norm * me->window[pos] * me->last_frame[pos];
+      me->fft_in[pos] = me->fft_norm * me->window[pos] * me->last_frame[pos];
     }
 
-    kiss_fftr(me->fft_cfg, timedata, freqdata);
+    fftwf_execute(me->fft_plan);
 
     // Loop over two possible frequency bin offsets (for averaging)
     for (int freq_sub = 0; freq_sub < me->wf.freq_osr; ++freq_sub) {
       for (int bin = 0; bin < me->wf.num_bins; ++bin) {
         int src_bin = (bin * me->wf.freq_osr) + freq_sub;
-        float mag2 = (freqdata[src_bin].i * freqdata[src_bin].i) +
-                     (freqdata[src_bin].r * freqdata[src_bin].r);
-        float db = 10.0f * log10f(1E-12f + mag2);
-        // Scale decibels to unsigned 8-bit range and clamp the value
-        // Range 0-240 covers -120..0 dB in 0.5 dB steps
-        int scaled = (int)(2 * db + 240);
+        union {
+          float f;
+          uint32_t u;
+        } v;
+        v.f = (me->fft_out[src_bin][1] * me->fft_out[src_bin][1]) +
+              (me->fft_out[src_bin][0] * me->fft_out[src_bin][0]);
 
-        me->wf.mag[offset] = (scaled < 0) ? 0 : ((scaled > 255) ? 255 : scaled);
+        uint32_t idx = (v.u >> 15) & 0xffff;
+        me->wf.mag[offset] = log_lut[idx];
         ++offset;
 
+        float db = db_lut[idx];
         if (db > me->max_mag)
           me->max_mag = db;
       }
@@ -259,8 +285,7 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
   monitor_t mon = {0};
   monitor_config_t const mon_cfg = {
       .f_min = 100,
-      .f_max =
-          sample_rate / 3, // This is closer to what is actually used.
+      .f_max = sample_rate / 3, // This is closer to what is actually used.
       .sample_rate = sample_rate,
       .time_osr = kTime_osr,
       .freq_osr = kFreq_osr,
@@ -280,15 +305,13 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
   // Find top candidates by Costas sync score and localize them in time and
   // frequency
   int const candidate_size =
-      (mon_cfg.f_max * kMax_candidates * mon_cfg.time_osr / 2 *
-       mon_cfg.freq_osr / 2) /
+      (mon_cfg.f_max * kMax_candidates) /
       3000; // Scale by bandwidth relative to the original 3 kHz
   candidate_t candidate_list[candidate_size];
   int num_candidates =
       ft8_find_sync(&mon.wf, candidate_size, candidate_list, kMin_score);
 
-  fprintf(stderr, "Candidates = %d (of %d)\n", num_candidates,
-          candidate_size);
+  LOG(LOG_DEBUG, "Candidates = %d (of %d)\n", num_candidates, candidate_size);
 
   // Hash table for decoded messages (to check for duplicates)
   int num_decoded = 0;
