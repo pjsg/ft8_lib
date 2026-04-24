@@ -1,8 +1,8 @@
 CFLAGS = -O3 -ggdb3 -march=native -flto -ffast-math
-CFLAGS = -O3 -march=native -flto -ffast-math -Rpass=loop-vectorize -Rpass-analysis=loop-vectorize
+#CFLAGS = -O3 -march=native -flto -ffast-math -Rpass=loop-vectorize -Rpass-analysis=loop-vectorize
 CPPFLAGS = -std=c11 -I.
-CC=clang
-LDFLAGS = -latomic -lbsd -lm -flto -Rpass=loop-vectorize
+#CC=clang
+LDFLAGS = -latomic -lbsd -lm -flto 
 
 TARGETS = gen_ft8 decode_ft8 test
 
