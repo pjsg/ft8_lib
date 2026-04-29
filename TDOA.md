@@ -1,7 +1,7 @@
 ## LLM Prompt: High-Precision FT8 TOA/FOA Refinement
 
 **Context:**
-I am modifying `ft8_lib` (C/C++) to perform high-precision Time of Arrival (TOA) and Frequency of Arrival (FOA) estimation on all decoded FT8 signals. The goal is TDOA geolocation. I am using `FFTW3` for transforms.
+You will modify `ft8_lib` (C/C++) to perform high-precision Time of Arrival (TOA) and Frequency of Arrival (FOA) estimation on all decoded FT8 signals. The goal is TDOA geolocation. Use `FFTW3` for transforms.
 
 **System Requirements:**
 * **Input:** Access to the full 15-second audio buffer (standard 12kHz sample rate) and the metadata from a successful `ft8_lib` decode (message string, coarse frequency, coarse DT).

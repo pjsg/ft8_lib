@@ -16,6 +16,7 @@
 
 #include "common/debug.h"
 #include "common/wave.h"
+#include "refine.h"
 #include "fft/kiss_fft.h"
 #include "fft/kiss_fftr.h"
 
@@ -385,12 +386,33 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
     if (mp == NULL)
       continue; // Shouldn't happen
 
-    fprintf(stdout,
-            "%4d/%02d/%02d %02d:%02d:%02d %3d %+4.2lf %'.1lf ~ %s  #%s\n",
-            tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour,
-            tmp->tm_min, tmp->tm_sec, mp->score, tbase + mp->time_sec,
-            1.0e6 * base_freq + mp->freq_hz, mp->text,
-            hexify(hexbuffer, mp->bits, sizeof(mp->bits)));
+    precision_report_t report = {0};
+    int n_sym = FT8_NN;
+    float sym_period = FT8_SYMBOL_PERIOD;
+    float sym_bt = 2.0f; // GFSK BT for FT8 (matches gen_ft8.c)
+    if (refine_signal_params(signal, num_samples, sample_rate,
+                             mp->bits, mp->text,
+                             mp->freq_hz, mp->time_sec,
+                             n_sym, sym_period, sym_bt,
+                             &report) == 0) {
+      fprintf(stdout,
+              "%4d/%02d/%02d %02d:%02d:%02d %3d %+4.2lf %'.1lf ~ %s  "
+              "#%s  [TOA=%.3fms FINE=%.2fHz SNR=%.1f]\n",
+              tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday,
+              tmp->tm_hour, tmp->tm_min, tmp->tm_sec,
+              mp->score, tbase + mp->time_sec,
+              1.0e6 * base_freq + mp->freq_hz, mp->text,
+              hexify(hexbuffer, mp->bits, sizeof(mp->bits)),
+              report.toa_ms, report.freq_hz, report.snr_refined);
+    } else {
+      fprintf(stdout,
+              "%4d/%02d/%02d %02d:%02d:%02d %3d %+4.2lf %'.1lf ~ %s  #%s\n",
+              tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday,
+              tmp->tm_hour, tmp->tm_min, tmp->tm_sec,
+              mp->score, tbase + mp->time_sec,
+              1.0e6 * base_freq + mp->freq_hz, mp->text,
+              hexify(hexbuffer, mp->bits, sizeof(mp->bits)));
+    }
   }
   free(decoded);
   free(decoded_hashtable);
