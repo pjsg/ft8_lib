@@ -12,7 +12,7 @@
 
 #include "common/debug.h"
 
-#define LOG_LEVEL LOG_DEBUG
+#define LOG_LEVEL LOG_INFO
 
 /* ---------- GFSK constants (mirror gen_ft8.c) ---------- */
 #define GFSK_CONST_K 5.336446f
@@ -114,12 +114,12 @@ int refine_signal_params(const float *signal,
     LOG(LOG_INFO, "refine: tpl_len=%d, signal_len=%d, coarse_freq=%.2f, coarse_time=%.3f\n",
         tpl_len, signal_len, coarse_freq_hz, coarse_time_sec);
 
-    /* FFT size for linear convolution */
+    /* FFT size for linear correlation */
     int fft_n = 1;
     while (fft_n < signal_len + tpl_len - 1)
         fft_n <<= 1;
 
-    /* ---- Generate template at the coarse frequency ---- */
+    /* ---- Generate template at coarse frequency ---- */
     uint8_t tones[FT8_NN];
     ft8_encode(bits, tones);
 
@@ -127,15 +127,15 @@ int refine_signal_params(const float *signal,
     make_sine_tpl(tones, n_sym, coarse_freq_hz, symbol_bt, symbol_period,
                   sample_rate, tpl);
 
-    /* Normalize template to unit energy */
+    /* Normalize template */
     double tpl_energy = 0;
     for (int i = 0; i < tpl_len; ++i)
         tpl_energy += tpl[i] * tpl[i];
     double tpl_norm = sqrt(tpl_energy);
     for (int i = 0; i < tpl_len; ++i)
-        tpl[i] /= tpl_norm;
+        tpl[i] /= (float)tpl_norm;
 
-    /* ---- Use r2c/c2r FFT plans ---- */
+    /* ---- FFT plans (real-to-complex) ---- */
     double *a = fftw_malloc(fft_n * sizeof(double));
     double *b = fftw_malloc(fft_n * sizeof(double));
     fftw_complex *A = fftw_alloc_complex(fft_n / 2 + 1);
@@ -146,47 +146,48 @@ int refine_signal_params(const float *signal,
     fftw_plan pb = fftw_plan_dft_r2c_1d(fft_n, b, B, FFTW_ESTIMATE);
     fftw_plan pi = fftw_plan_dft_c2r_1d(fft_n, B, corr, FFTW_ESTIMATE);
 
+    int nfreq = fft_n / 2 + 1;
+
     /* FFT of signal */
     for (int i = 0; i < signal_len; ++i)
         a[i] = signal[i];
-    for (int i = signal_len; i < fft_n; ++i)
-        a[i] = 0;
     fftw_execute(pa);
 
     /* FFT of template */
     for (int i = 0; i < tpl_len; ++i)
         b[i] = tpl[i];
-    for (int i = tpl_len; i < fft_n; ++i)
-        b[i] = 0;
     fftw_execute(pb);
 
-    /* Cross-correlation: B_out = A * conj(B), then IFFT
-       r2c output has fft_n/2+1 entries */
-    int nfreq = fft_n / 2 + 1;
+    /* Cross-correlation: IFFT(A * conj(B)) */
     for (int k = 0; k < nfreq; ++k) {
         double re = A[k][0] * B[k][0] + A[k][1] * B[k][1];
         double im = A[k][1] * B[k][0] - A[k][0] * B[k][1];
         B[k][0] = re;
         B[k][1] = im;
     }
-
-    /* IFFT gives correlation */
     fftw_execute(pi);
 
-    /* Find peak correlation position */
+    /* Find peak near the coarse time estimate (within +/-200 ms) */
     int npts = signal_len - tpl_len + 1;
-    int best_lag = 0;
-    double best_val = -1e30;
+    int est_lag = (int)(coarse_time_sec * sample_rate);
+    int search_window = (int)(0.2 * sample_rate);  /* 200 ms */
+    int rs = est_lag - search_window;
+    int re = est_lag + search_window;
+    if (rs < 0) rs = 0;
+    if (re >= npts) re = npts - 1;
 
-    for (int i = 0; i < npts; ++i) {
+    int best_lag = rs;
+    double best_val = corr[rs];
+
+    for (int i = rs + 1; i <= re; ++i) {
         if (corr[i] > best_val) {
             best_val = corr[i];
             best_lag = i;
         }
     }
 
-    LOG(LOG_INFO, "refine: peak at lag %d (%.3f ms), value=%.1f\n",
-        best_lag, best_lag * 1000.0 / sample_rate, best_val);
+    LOG(LOG_INFO, "refine: search [%d,%d], peak lag=%d (%.3f ms), val=%.1f\n",
+        rs, re, best_lag, best_lag * 1000.0 / sample_rate, best_val);
 
     /* Parabolic interpolation for sub-sample TOA */
     double delta = 0;
@@ -202,7 +203,7 @@ int refine_signal_params(const float *signal,
     double abs_sample = best_lag + delta;
     report->toa_ms = abs_sample * 1000.0 / sample_rate;
 
-    /* SNR estimate: peak / median of |corr| */
+    /* SNR: peak / median of |corr| */
     {
         double *sorted = malloc(npts * sizeof(double));
         for (int i = 0; i < npts; ++i)
@@ -220,13 +221,17 @@ int refine_signal_params(const float *signal,
         free(sorted);
     }
 
-    /* Frequency refinement: narrow sweep around coarse_freq
-       Use the same template at slightly different frequencies
-       and find which gives best correlation peak */
+    /* ---- Frequency sweep around known TOA ---- */
     {
-        const int nf = 41;
-        const double f_step = 0.25;
+        const int nf = 101;
+        const double f_step = 0.1;
         double *peak_vals = malloc(nf * sizeof(double));
+
+        /* Search region: narrow window around coarse time estimate */
+        int rs2 = est_lag - search_window;
+        int re2 = est_lag + search_window;
+        if (rs2 < 0) rs2 = 0;
+        if (re2 >= npts) re2 = npts - 1;
 
         for (int fi = 0; fi < nf; ++fi) {
             double df = (fi - nf / 2) * f_step;
@@ -242,14 +247,12 @@ int refine_signal_params(const float *signal,
                 e += tpl_f[i] * tpl_f[i];
             double nrm = sqrt(e);
             for (int i = 0; i < tpl_len; ++i)
-                tpl_f[i] /= nrm;
+                b[i] = tpl_f[i] / (float)nrm;
+            for (int i = tpl_len; i < fft_n; ++i)
+                b[i] = 0;
 
-            /* FFT of this-frequency template */
-            for (int i = 0; i < tpl_len; ++i)
-                b[i] = tpl_f[i];
             fftw_execute(pb);
 
-            /* Cross-correlate */
             for (int k = 0; k < nfreq; ++k) {
                 double re = A[k][0] * B[k][0] + A[k][1] * B[k][1];
                 double im = A[k][1] * B[k][0] - A[k][0] * B[k][1];
@@ -258,11 +261,6 @@ int refine_signal_params(const float *signal,
             }
             fftw_execute(pi);
 
-            /* Find peak near the TOA we already know */
-            int rs = best_lag - 100;
-            int re = best_lag + 100;
-            if (rs < 0) rs = 0;
-            if (re >= npts) re = npts - 1;
             double pk = 0;
             for (int i = rs; i <= re; ++i)
                 if (corr[i] > pk)
@@ -290,6 +288,52 @@ int refine_signal_params(const float *signal,
             }
         }
         report->freq_hz = fine_freq;
+
+        /* Refine TOA at fine frequency */
+        float *tpl_fine = malloc(tpl_len * sizeof(float));
+        make_sine_tpl(tones, n_sym, (float)fine_freq, symbol_bt, symbol_period,
+                      sample_rate, tpl_fine);
+        double e = 0;
+        for (int i = 0; i < tpl_len; ++i)
+            e += tpl_fine[i] * tpl_fine[i];
+        double nrm = sqrt(e);
+        for (int i = 0; i < tpl_len; ++i)
+            b[i] = tpl_fine[i] / (float)nrm;
+        fftw_execute(pb);
+        for (int k = 0; k < nfreq; ++k) {
+            double re = A[k][0] * B[k][0] + A[k][1] * B[k][1];
+            double im = A[k][1] * B[k][0] - A[k][0] * B[k][1];
+            B[k][0] = re;
+            B[k][1] = im;
+        }
+        fftw_execute(pi);
+
+        /* Search narrow region around current best_lag */
+        int rs3 = best_lag - 10;
+        int re3 = best_lag + 10;
+        if (rs3 < 0) rs3 = 0;
+        if (re3 >= npts) re3 = npts - 1;
+        int best_lag2 = best_lag;
+        double best_val2 = -1e30;
+        for (int i = rs2; i <= re2; ++i)
+            if (corr[i] > best_val2) {
+                best_val2 = corr[i];
+                best_lag2 = i;
+            }
+
+        /* Parabolic interpolation at fine freq */
+        delta = 0;
+        if (best_lag2 > 0 && best_lag2 < npts - 1) {
+            double ya = corr[best_lag2 - 1];
+            double yc = corr[best_lag2];
+            double yb = corr[best_lag2 + 1];
+            double denom = ya - 2 * yc + yb;
+            if (fabs(denom) > 1e-12)
+                delta = 0.5 * (ya - yb) / denom;
+        }
+        abs_sample = best_lag2 + delta;
+        report->toa_ms = abs_sample * 1000.0 / sample_rate;
+        free(tpl_fine);
         free(peak_vals);
     }
 
