@@ -12,7 +12,7 @@
 
 #include "common/debug.h"
 
-#define LOG_LEVEL LOG_INFO
+#define LOG_LEVEL LOG_WARN
 
 /* ---------- GFSK constants (mirror gen_ft8.c) ---------- */
 #define GFSK_CONST_K 5.336446f

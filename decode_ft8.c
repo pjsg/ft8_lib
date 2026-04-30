@@ -288,8 +288,8 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
   int num_candidates =
       ft8_find_sync(&mon.wf, candidate_size, candidate_list, kMin_score);
 
-  fprintf(stderr, "Candidates = %d (of %d)\n", num_candidates,
-          candidate_size);
+  //fprintf(stderr, "Candidates = %d (of %d)\n", num_candidates,
+  //        candidate_size);
 
   // Hash table for decoded messages (to check for duplicates)
   int num_decoded = 0;
