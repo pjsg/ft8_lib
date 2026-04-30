@@ -148,9 +148,10 @@ int main(void)
         for (int i = 0; i < sig_len; ++i)
             buf[offset + i] += sig[i] * 0.5f;  /* scale signal to 50% amplitude */
 
-        /* Save as WAV */
+        /* Save as WAV with timestamped name so decoder parses tbase=0 */
         char wavpath[256];
-        snprintf(wavpath, sizeof(wavpath), "/tmp/test_refine_%d.wav", t);
+        snprintf(wavpath, sizeof(wavpath),
+                 "/tmp/20260430T000000_test%d.wav", t);
         save_wav(buf, NUM_SAMPLES, SAMPLE_RATE, wavpath);
 
         /* Run decoder */
@@ -169,10 +170,11 @@ int main(void)
         while (fgets(line, sizeof(line), fp)) {
             if (strstr(line, message)) {
                 /* Parse output */
-                float toa_ms, fine_freq, snr;
-                char *tp = strstr(line, "[TOA=");
-                if (tp && sscanf(tp + 5, "%fms FINE=%fHz SNR=%f",
-                           &toa_ms, &fine_freq, &snr) == 3) {
+                double abs_toa_s, fine_freq, snr;
+                char *tp = strstr(line, "[ABS_TOA=");
+                if (tp && sscanf(tp + 9, "%lf FINE=%lfHz SNR=%lf",
+                           &abs_toa_s, &fine_freq, &snr) == 3) {
+                    double toa_ms = abs_toa_s * 1000.0;
                     double toa_err_ms  = toa_ms - expected_toa_ms;
                     double freq_err_hz = fine_freq - freq;
                     printf("Test %d: freq=%.2f Hz, offset=%d samples (%.2fms)\n",

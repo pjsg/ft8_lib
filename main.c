@@ -612,10 +612,15 @@ int process_file(char const * const path, bool is_ft8, double base_freq){
       char *npath = strdup(path);
       char const *bn = basename(npath);
       int year,mon,day,hr,minute,sec;
+      double fsec_from_name = 0;
       char junk;
-      int r = sscanf(bn,"%04d%02d%02d%c%02d%02d%02d",&year,&mon,&day,&junk,&hr,&minute,&sec);
+      int r = sscanf(bn,"%04d%02d%02d%c%02d%02d%02d.%lf",&year,&mon,&day,&junk,&hr,&minute,&sec,&fsec_from_name);
+      if(r < 7) {
+	// Try without fractional seconds
+	r = sscanf(bn,"%04d%02d%02d%c%02d%02d%02d",&year,&mon,&day,&junk,&hr,&minute,&sec);
+      }
       free(npath);
-      if(r == 7){
+      if(r >= 7){
 	// Convert to Unix-style struct tm (using its conventions)
 	tmp.tm_year = year - 1900;
 	tmp.tm_mon = mon - 1;
@@ -623,10 +628,10 @@ int process_file(char const * const path, bool is_ft8, double base_freq){
 	tmp.tm_hour = hr;
 	tmp.tm_min = minute;
 	tmp.tm_sec = sec;
-	fsec = 0; // Not available
+	fsec = fsec_from_name;
 	tmp_set = true;
 	if(Verbose > 1)
-	  fprintf(stderr,"Time extracted from filename\n");
+	  fprintf(stderr,"Time extracted from filename, fsec=%.6f\n", fsec);
       }
   }
   if(!tmp_set){
