@@ -614,7 +614,7 @@ int process_file(char const * const path, bool is_ft8, double base_freq){
       int year,mon,day,hr,minute,sec;
       double fsec_from_name = 0;
       char junk;
-      int r = sscanf(bn,"%04d%02d%02d%c%02d%02d%02d.%lf",&year,&mon,&day,&junk,&hr,&minute,&sec,&fsec_from_name);
+      int r = sscanf(bn,"%04d%02d%02d%c%02d%02d%02d%lf",&year,&mon,&day,&junk,&hr,&minute,&sec,&fsec_from_name);
       if(r < 7) {
 	// Try without fractional seconds
 	r = sscanf(bn,"%04d%02d%02d%c%02d%02d%02d",&year,&mon,&day,&junk,&hr,&minute,&sec);
