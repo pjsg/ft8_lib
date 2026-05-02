@@ -14,6 +14,7 @@ typedef struct {
     double freq_hz;    ///< Refined frequency (0.01 Hz precision)
     double toa_ms;     ///< Refined TOA in ms from start of 15s window (0.001 ms precision)
     float  snr_refined; ///< Correlation peak-to-median ratio
+    float  sync_confidence; ///< Ratio of primary peak to next highest non-adjacent peak
 } precision_report_t;
 
 /// Generate a real-valued GFSK template for the decoded message.

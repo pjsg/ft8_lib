@@ -77,11 +77,11 @@ static void make_sine_tpl(const uint8_t *tones,
 /* ---------- Public API ---------- */
 
 float *refine_generate_template(const uint8_t bits[10],
-                               int n_sym,
-                               float symbol_period,
-                               float symbol_bt,
-                               float freq_hz,
-                               int sample_rate)
+                                int n_sym,
+                                float symbol_period,
+                                float symbol_bt,
+                                float freq_hz,
+                                int sample_rate)
 {
     uint8_t tones[FT8_NN];
     ft8_encode(bits, tones);
@@ -151,11 +151,15 @@ int refine_signal_params(const float *signal,
     /* FFT of signal */
     for (int i = 0; i < signal_len; ++i)
         a[i] = signal[i];
+    for (int i = signal_len; i < fft_n; ++i)
+        a[i] = 0;
     fftw_execute(pa);
 
     /* FFT of template */
     for (int i = 0; i < tpl_len; ++i)
         b[i] = tpl[i];
+    for (int i = tpl_len; i < fft_n; ++i)
+        b[i] = 0;
     fftw_execute(pb);
 
     /* Cross-correlation: IFFT(A * conj(B)) */
@@ -167,71 +171,44 @@ int refine_signal_params(const float *signal,
     }
     fftw_execute(pi);
 
-    /* Find peak near the coarse time estimate (within +/-200 ms) */
+    /* Find peak near the coarse time estimate (within +/-250 ms) */
     int npts = signal_len - tpl_len + 1;
     int est_lag = (int)(coarse_time_sec * sample_rate);
-    int search_window = (int)(0.2 * sample_rate);  /* 200 ms */
+    int search_window = (int)(0.25 * sample_rate);  /* 250 ms */
     int rs = est_lag - search_window;
     int re = est_lag + search_window;
     if (rs < 0) rs = 0;
     if (re >= npts) re = npts - 1;
 
     int best_lag = rs;
-    double best_val = corr[rs];
+    double best_val = -1e30;
 
-    for (int i = rs + 1; i <= re; ++i) {
+    for (int i = rs; i <= re; ++i) {
         if (corr[i] > best_val) {
             best_val = corr[i];
             best_lag = i;
         }
     }
 
-    LOG(LOG_INFO, "refine: search [%d,%d], peak lag=%d (%.3f ms), val=%.1f\n",
-        rs, re, best_lag, best_lag * 1000.0 / sample_rate, best_val);
-
-    /* Parabolic interpolation for sub-sample TOA */
-    double delta = 0;
-    if (best_lag > 0 && best_lag < npts - 1) {
-        double ya = corr[best_lag - 1];
-        double yc = corr[best_lag];
-        double yb = corr[best_lag + 1];
-        double denom = ya - 2 * yc + yb;
-        if (fabs(denom) > 1e-12)
-            delta = 0.5 * (ya - yb) / denom;
+    /* Find secondary peak for confidence metric (must be at least 1/2 symbol away) */
+    int min_dist = n_spsym / 2;
+    double second_val = 0;
+    for (int i = rs; i <= re; ++i) {
+        if (abs(i - best_lag) < min_dist) continue;
+        if (corr[i] > second_val) {
+            second_val = corr[i];
+        }
     }
+    report->sync_confidence = (second_val > 1e-6) ? (float)(best_val / second_val) : 10.0f;
 
-    double abs_sample = best_lag + delta;
-    report->toa_ms = abs_sample * 1000.0 / sample_rate;
+    LOG(LOG_INFO, "refine: search [%d,%d], peak lag=%d (%.3f ms), val=%.1f, conf=%.2f\n",
+        rs, re, best_lag, best_lag * 1000.0 / sample_rate, best_val, report->sync_confidence);
 
-    /* SNR: peak / median of |corr| */
-    {
-        double *sorted = malloc(npts * sizeof(double));
-        for (int i = 0; i < npts; ++i)
-            sorted[i] = fabs(corr[i]);
-        for (int gap = npts / 2; gap > 0; gap /= 2)
-            for (int i = gap; i < npts; ++i) {
-                double tmp = sorted[i];
-                int j;
-                for (j = i; j >= gap && sorted[j - gap] > tmp; j -= gap)
-                    sorted[j] = sorted[j - gap];
-                sorted[j] = tmp;
-            }
-        double median = sorted[npts / 2];
-        report->snr_refined = (median > 0) ? (float)(fabs(best_val) / median) : 0;
-        free(sorted);
-    }
-
-    /* ---- Frequency sweep around known TOA ---- */
+    /* ---- Frequency sweep around current best lag ---- */
     {
         const int nf = 101;
         const double f_step = 0.1;
         double *peak_vals = malloc(nf * sizeof(double));
-
-        /* Search region: narrow window around coarse time estimate */
-        int rs2 = est_lag - search_window;
-        int re2 = est_lag + search_window;
-        if (rs2 < 0) rs2 = 0;
-        if (re2 >= npts) re2 = npts - 1;
 
         for (int fi = 0; fi < nf; ++fi) {
             double df = (fi - nf / 2) * f_step;
@@ -261,8 +238,13 @@ int refine_signal_params(const float *signal,
             }
             fftw_execute(pi);
 
-            double pk = 0;
-            for (int i = rs; i <= re; ++i)
+            /* Check only near our current best_lag */
+            double pk = -1e30;
+            int sweep_rs = best_lag - 10;
+            int sweep_re = best_lag + 10;
+            if (sweep_rs < 0) sweep_rs = 0;
+            if (sweep_re >= npts) sweep_re = npts - 1;
+            for (int i = sweep_rs; i <= sweep_re; ++i)
                 if (corr[i] > pk)
                     pk = corr[i];
             peak_vals[fi] = pk;
@@ -289,7 +271,7 @@ int refine_signal_params(const float *signal,
         }
         report->freq_hz = fine_freq;
 
-        /* Refine TOA at fine frequency */
+        /* Final TOA refinement at best frequency */
         float *tpl_fine = malloc(tpl_len * sizeof(float));
         make_sine_tpl(tones, n_sym, (float)fine_freq, symbol_bt, symbol_period,
                       sample_rate, tpl_fine);
@@ -299,6 +281,8 @@ int refine_signal_params(const float *signal,
         double nrm = sqrt(e);
         for (int i = 0; i < tpl_len; ++i)
             b[i] = tpl_fine[i] / (float)nrm;
+        for (int i = tpl_len; i < fft_n; ++i)
+            b[i] = 0;
         fftw_execute(pb);
         for (int k = 0; k < nfreq; ++k) {
             double re = A[k][0] * B[k][0] + A[k][1] * B[k][1];
@@ -308,40 +292,65 @@ int refine_signal_params(const float *signal,
         }
         fftw_execute(pi);
 
-        /* Search narrow region around current best_lag */
-        int rs3 = best_lag - 10;
-        int re3 = best_lag + 10;
-        if (rs3 < 0) rs3 = 0;
-        if (re3 >= npts) re3 = npts - 1;
-        int best_lag2 = best_lag;
-        double best_val2 = -1e30;
-        for (int i = rs2; i <= re2; ++i)
-            if (corr[i] > best_val2) {
-                best_val2 = corr[i];
-                best_lag2 = i;
+        int final_lag = rs;
+        double final_val = -1e30;
+        for (int i = rs; i <= re; ++i) {
+            if (corr[i] > final_val) {
+                final_val = corr[i];
+                final_lag = i;
             }
+        }
 
-        /* Parabolic interpolation at fine freq */
-        delta = 0;
-        if (best_lag2 > 0 && best_lag2 < npts - 1) {
-            double ya = corr[best_lag2 - 1];
-            double yc = corr[best_lag2];
-            double yb = corr[best_lag2 + 1];
+        double final_second_val = 0;
+        for (int i = rs; i <= re; ++i) {
+            if (abs(i - final_lag) < min_dist) continue;
+            if (corr[i] > final_second_val) {
+                final_second_val = corr[i];
+            }
+        }
+        report->sync_confidence = (final_second_val > 1e-6) ? (float)(final_val / final_second_val) : 10.0f;
+        
+        /* Update best_val so SNR calculation works correctly later */
+        best_val = final_val;
+
+        /* Parabolic interpolation for sub-sample TOA */
+        double delta = 0;
+        if (final_lag > 0 && final_lag < npts - 1) {
+            double ya = corr[final_lag - 1];
+            double yc = corr[final_lag];
+            double yb = corr[final_lag + 1];
             double denom = ya - 2 * yc + yb;
             if (fabs(denom) > 1e-12)
                 delta = 0.5 * (ya - yb) / denom;
         }
-        abs_sample = best_lag2 + delta;
-        report->toa_ms = abs_sample * 1000.0 / sample_rate;
+        report->toa_ms = (final_lag + delta) * 1000.0 / sample_rate;
         free(tpl_fine);
         free(peak_vals);
+    }
+
+    /* SNR: peak / median of |corr| (approximate median using shell sort) */
+    {
+        double *sorted = malloc(npts * sizeof(double));
+        for (int i = 0; i < npts; ++i)
+            sorted[i] = fabs(corr[i]);
+        for (int gap = npts / 2; gap > 0; gap /= 2)
+            for (int i = gap; i < npts; ++i) {
+                double tmp = sorted[i];
+                int j;
+                for (j = i; j >= gap && sorted[j - gap] > tmp; j -= gap)
+                    sorted[j] = sorted[j - gap];
+                sorted[j] = tmp;
+            }
+        double median = sorted[npts / 2];
+        report->snr_refined = (median > 0) ? (float)(fabs(best_val) / median) : 0;
+        free(sorted);
     }
 
     /* Fill report */
     snprintf(report->message, sizeof(report->message), "%s", text);
 
-    LOG(LOG_INFO, "refine -> TOA=%.3f ms, freq=%.2f Hz, SNR=%.1f\n",
-        report->toa_ms, report->freq_hz, report->snr_refined);
+    LOG(LOG_INFO, "refine -> TOA=%.3f ms, freq=%.2f Hz, SNR=%.1f, CONF=%.2f\n",
+        report->toa_ms, report->freq_hz, report->snr_refined, report->sync_confidence);
 
     /* Cleanup */
     free(tpl);

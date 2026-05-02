@@ -399,13 +399,14 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
       double abs_toa_s = tbase + report.toa_ms / 1000.0;
       fprintf(stdout,
               "%4d/%02d/%02d %02d:%02d:%02d %3d %+.6lf %'.1lf ~ %s  "
-              "#%s  [ABS_TOA=%+.6lf FINE=%.2fHz SNR=%.1f]\n",
+              "#%s  [ABS_TOA=%+.6lf FINE=%.2fHz SNR=%.1f CONF=%.2f]\n",
               tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday,
               tmp->tm_hour, tmp->tm_min, tmp->tm_sec,
               mp->score, abs_toa_s,
               1.0e6 * base_freq + mp->freq_hz, mp->text,
               hexify(hexbuffer, mp->bits, sizeof(mp->bits)),
-              abs_toa_s, report.freq_hz, report.snr_refined);
+              abs_toa_s, report.freq_hz, report.snr_refined, report.sync_confidence);
+
     } else {
       fprintf(stdout,
               "%4d/%02d/%02d %02d:%02d:%02d %3d %+4.2lf %'.1lf ~ %s  #%s\n",
