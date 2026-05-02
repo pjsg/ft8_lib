@@ -5,6 +5,12 @@ CPPFLAGS = -std=c11 -I.
 LDFLAGS = -latomic -lbsd -lm -lfftw3 -flto 
 
 TARGETS = gen_ft8 decode_ft8 test test_refine
+CFLAGS = -O3 -ggdb3 -march=native -flto -ffast-math 
+CPPFLAGS = -std=c11 -I. $(shell pkg-config --cflags fftw3)
+LDFLAGS = -lm -flto $(shell pkg-config --libs fftw3)
+LDFLAGS_KISS = -lm -flto 
+
+TARGETS = gen_ft8 decode_ft8 test decode_ft8_kiss
 
 .PHONY: run_tests all clean
 
