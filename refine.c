@@ -136,15 +136,15 @@ int refine_signal_params(const float *signal,
         tpl[i] /= (float)tpl_norm;
 
     /* ---- FFT plans (real-to-complex) ---- */
-    double *a = fftw_malloc(fft_n * sizeof(double));
-    double *b = fftw_malloc(fft_n * sizeof(double));
-    fftw_complex *A = fftw_alloc_complex(fft_n / 2 + 1);
-    fftw_complex *B = fftw_alloc_complex(fft_n / 2 + 1);
-    double *corr = fftw_malloc(fft_n * sizeof(double));
+    float *a = fftwf_malloc(fft_n * sizeof(float));
+    float *b = fftwf_malloc(fft_n * sizeof(float));
+    fftwf_complex *A = fftwf_alloc_complex(fft_n / 2 + 1);
+    fftwf_complex *B = fftwf_alloc_complex(fft_n / 2 + 1);
+    float *corr = fftwf_malloc(fft_n * sizeof(float));
 
-    fftw_plan pa = fftw_plan_dft_r2c_1d(fft_n, a, A, FFTW_ESTIMATE);
-    fftw_plan pb = fftw_plan_dft_r2c_1d(fft_n, b, B, FFTW_ESTIMATE);
-    fftw_plan pi = fftw_plan_dft_c2r_1d(fft_n, B, corr, FFTW_ESTIMATE);
+    fftwf_plan pa = fftwf_plan_dft_r2c_1d(fft_n, a, A, FFTW_ESTIMATE);
+    fftwf_plan pb = fftwf_plan_dft_r2c_1d(fft_n, b, B, FFTW_ESTIMATE);
+    fftwf_plan pi = fftwf_plan_dft_c2r_1d(fft_n, B, corr, FFTW_ESTIMATE);
 
     int nfreq = fft_n / 2 + 1;
 
@@ -153,23 +153,23 @@ int refine_signal_params(const float *signal,
         a[i] = signal[i];
     for (int i = signal_len; i < fft_n; ++i)
         a[i] = 0;
-    fftw_execute(pa);
+    fftwf_execute(pa);
 
     /* FFT of template */
     for (int i = 0; i < tpl_len; ++i)
         b[i] = tpl[i];
     for (int i = tpl_len; i < fft_n; ++i)
         b[i] = 0;
-    fftw_execute(pb);
+    fftwf_execute(pb);
 
     /* Cross-correlation: IFFT(A * conj(B)) */
     for (int k = 0; k < nfreq; ++k) {
-        double re = A[k][0] * B[k][0] + A[k][1] * B[k][1];
-        double im = A[k][1] * B[k][0] - A[k][0] * B[k][1];
+        float re = A[k][0] * B[k][0] + A[k][1] * B[k][1];
+        float im = A[k][1] * B[k][0] - A[k][0] * B[k][1];
         B[k][0] = re;
         B[k][1] = im;
     }
-    fftw_execute(pi);
+    fftwf_execute(pi);
 
     /* Find peak near the coarse time estimate (within +/-250 ms) */
     int npts = signal_len - tpl_len + 1;
@@ -228,15 +228,15 @@ int refine_signal_params(const float *signal,
             for (int i = tpl_len; i < fft_n; ++i)
                 b[i] = 0;
 
-            fftw_execute(pb);
+            fftwf_execute(pb);
 
             for (int k = 0; k < nfreq; ++k) {
-                double re = A[k][0] * B[k][0] + A[k][1] * B[k][1];
-                double im = A[k][1] * B[k][0] - A[k][0] * B[k][1];
+                float re = A[k][0] * B[k][0] + A[k][1] * B[k][1];
+                float im = A[k][1] * B[k][0] - A[k][0] * B[k][1];
                 B[k][0] = re;
                 B[k][1] = im;
             }
-            fftw_execute(pi);
+            fftwf_execute(pi);
 
             /* Check only near our current best_lag */
             double pk = -1e30;
@@ -283,14 +283,14 @@ int refine_signal_params(const float *signal,
             b[i] = tpl_fine[i] / (float)nrm;
         for (int i = tpl_len; i < fft_n; ++i)
             b[i] = 0;
-        fftw_execute(pb);
+        fftwf_execute(pb);
         for (int k = 0; k < nfreq; ++k) {
-            double re = A[k][0] * B[k][0] + A[k][1] * B[k][1];
-            double im = A[k][1] * B[k][0] - A[k][0] * B[k][1];
+            float re = A[k][0] * B[k][0] + A[k][1] * B[k][1];
+            float im = A[k][1] * B[k][0] - A[k][0] * B[k][1];
             B[k][0] = re;
             B[k][1] = im;
         }
-        fftw_execute(pi);
+        fftwf_execute(pi);
 
         int final_lag = rs;
         double final_val = -1e30;
@@ -354,14 +354,14 @@ int refine_signal_params(const float *signal,
 
     /* Cleanup */
     free(tpl);
-    fftw_free(a);
-    fftw_free(b);
-    fftw_free(A);
-    fftw_free(B);
-    fftw_free(corr);
-    fftw_destroy_plan(pa);
-    fftw_destroy_plan(pb);
-    fftw_destroy_plan(pi);
+    fftwf_free(a);
+    fftwf_free(b);
+    fftwf_free(A);
+    fftwf_free(B);
+    fftwf_free(corr);
+    fftwf_destroy_plan(pa);
+    fftwf_destroy_plan(pb);
+    fftwf_destroy_plan(pi);
 
     return 0;
 }
