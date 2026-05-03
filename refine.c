@@ -111,8 +111,7 @@ int refine_signal_params(const float *signal,
     int n_spsym = (int)(0.5f + sample_rate * symbol_period);
     int tpl_len = n_sym * n_spsym;
 
-    LOG(LOG_INFO, "refine: tpl_len=%d, signal_len=%d, coarse_freq=%.2f, coarse_time=%.3f\n",
-        tpl_len, signal_len, coarse_freq_hz, coarse_time_sec);
+
 
     /* FFT size for linear correlation */
     int fft_n = 1;
@@ -174,7 +173,7 @@ int refine_signal_params(const float *signal,
     /* Find peak near the coarse time estimate (within +/-250 ms) */
     int npts = signal_len - tpl_len + 1;
     int est_lag = (int)(coarse_time_sec * sample_rate);
-    int search_window = (int)(0.25 * sample_rate);  /* 250 ms */
+    int search_window = (int)(0.50 * sample_rate);  /* 500 ms */
     int rs = est_lag - search_window;
     int re = est_lag + search_window;
     if (rs < 0) rs = 0;
@@ -201,8 +200,7 @@ int refine_signal_params(const float *signal,
     }
     report->sync_confidence = (second_val > 1e-6) ? (float)(best_val / second_val) : 10.0f;
 
-    LOG(LOG_INFO, "refine: search [%d,%d], peak lag=%d (%.3f ms), val=%.1f, conf=%.2f\n",
-        rs, re, best_lag, best_lag * 1000.0 / sample_rate, best_val, report->sync_confidence);
+
 
     /* ---- Frequency sweep around current best lag ---- */
     {
@@ -238,12 +236,10 @@ int refine_signal_params(const float *signal,
             }
             fftwf_execute(pi);
 
-            /* Check only near our current best_lag */
+            /* Check over the full coarse time window for each frequency */
             double pk = -1e30;
-            int sweep_rs = best_lag - 10;
-            int sweep_re = best_lag + 10;
-            if (sweep_rs < 0) sweep_rs = 0;
-            if (sweep_re >= npts) sweep_re = npts - 1;
+            int sweep_rs = rs;
+            int sweep_re = re;
             for (int i = sweep_rs; i <= sweep_re; ++i)
                 if (corr[i] > pk)
                     pk = corr[i];

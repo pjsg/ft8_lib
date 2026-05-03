@@ -567,13 +567,15 @@ int process_file(char const * const path, bool is_ft8, double base_freq){
 	fprintf(stderr,"Extracted base frequency %lf MHz from attribute\n",base_freq);
     } else {
       // Extract from file name
-      char *cp,*cp1;
-      // Should use basename in case directory element has _
-      if((cp = strchr(path,'_')) != NULL && (cp1 = strrchr(path,'_')) != NULL){
+      char *cp, *cp1;
+      char *bn = strdup(path);
+      char *bname = basename(bn);
+      if((cp = strchr(bname,'_')) != NULL && (cp1 = strrchr(bname,'_')) != NULL){
 	base_freq = strtod(cp+1,NULL) / 1e6;
-	if(Verbose > 1)
+        if(Verbose > 1)
 	  fprintf(stderr,"Extracted base frequency %lf MHz from file name\n",base_freq);
       }
+      free(bn);
     }
   }
   if(base_freq == 0)

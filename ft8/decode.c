@@ -235,13 +235,15 @@ int ft8_find_sync(const waterfall_t *wf, int num_candidates, candidate_t heap[],
           // search for the best candidate within one symbol period backwards and
           // forwards in time. The code is slightly nastier since the candidate time_sub
           // field is unsigned.
-          candidate_t search_candidate = candidate;
           candidate_t best_candidate = candidate;
-          search_candidate.time_offset--;
-          search_candidate.time_sub += 1;
+          candidate_t search_candidate = candidate;
           for (int time_osr_offset = -wf->time_osr; 
                time_osr_offset < wf->time_osr; 
-               ++time_osr_offset, ++search_candidate.time_sub) {
+               ++time_osr_offset) {
+            int abs_sub = (candidate.time_offset + 16) * wf->time_osr + candidate.time_sub + time_osr_offset;
+            search_candidate.time_offset = (abs_sub / wf->time_osr) - 16;
+            search_candidate.time_sub = abs_sub % wf->time_osr;
+
             if (wf->protocol == PROTO_FT4) {
               candidate_score = ft4_sync_score(wf, &search_candidate);
             } else {

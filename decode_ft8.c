@@ -383,7 +383,8 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
         (cand->freq_offset + (float)cand->freq_sub / mon.wf.freq_osr) /
         mon.symbol_period;
     float const time_sec =
-        (cand->time_offset + (float)cand->time_sub / mon.wf.time_osr) *
+        (cand->time_offset + (float)cand->time_sub / mon.wf.time_osr +
+         1.0f / mon.wf.time_osr - (float)mon.wf.freq_osr / 2.0f - 0.5f) *
         mon.symbol_period;
 
     message_t message = {0};      // Written by ft8_decode()
@@ -408,7 +409,8 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
 
     message.freq_hz = freq_hz;   // Save so we can sort on it and display it
     message.time_sec = time_sec; // Time offset of start from nominal UTC
-                                 // :00/:15/:30/:45 or :00/:07.5/:15/...
+    message.time_offset = cand->time_offset;
+    message.time_sub = cand->time_sub;
     message.score = cand->score;
 
     LOG(LOG_DEBUG, "Checking hash table for %4.1fs / %4.1fHz [%d]...\n",

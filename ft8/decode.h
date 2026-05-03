@@ -51,6 +51,8 @@ extern "C"
       float freq_hz;   // We will sort on this
       float time_sec;
       int score;
+      int16_t time_offset;
+      uint8_t time_sub;
     } message_t;
 
     /// Structure that contains the status of various steps during decoding of a message
