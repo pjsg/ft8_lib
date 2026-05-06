@@ -20,13 +20,13 @@
 #include "refine.h"
 #endif
 #ifdef USE_KISS
-#include "fft/kiss_fftr.h"
 #include "fft/kiss_fft.h"
+#include "fft/kiss_fftr.h"
 #else
 #include <fftw3.h>
 #endif
 
-#define LOG_LEVEL LOG_FATAL
+#define LOG_LEVEL LOG_INFO
 
 const int kMin_score = 10; // Minimum sync score threshold for candidates
 const int kMax_candidates =
@@ -177,9 +177,11 @@ void monitor_init(monitor_t *me, const monitor_config_t *cfg) {
   me->fft_cfg = kiss_fftr_alloc(me->nfft, 0, me->fft_work, &fft_work_size);
 #else
   me->fft_in = (float *)fftwf_malloc(sizeof(float) * me->nfft);
-  me->fft_out = (fftwf_complex *)fftwf_malloc(sizeof(fftwf_complex) * (me->nfft / 2 + 1));
+  me->fft_out =
+      (fftwf_complex *)fftwf_malloc(sizeof(fftwf_complex) * (me->nfft / 2 + 1));
   fftwf_import_wisdom_from_filename(".ft8_fftw_wisdom");
-  me->fft_plan = fftwf_plan_dft_r2c_1d(me->nfft, me->fft_in, me->fft_out, FFTW_MEASURE);
+  me->fft_plan =
+      fftwf_plan_dft_r2c_1d(me->nfft, me->fft_in, me->fft_out, FFTW_MEASURE);
   fftwf_export_wisdom_to_filename(".ft8_fftw_wisdom");
   log_lut_init();
 #endif
@@ -336,8 +338,7 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
   monitor_t mon = {0};
   monitor_config_t const mon_cfg = {
       .f_min = 100,
-      .f_max =
-          sample_rate / 3, // This is closer to what is actually used.
+      .f_max = sample_rate / 3, // This is closer to what is actually used.
       .sample_rate = sample_rate,
       .time_osr = kTime_osr,
       .freq_osr = kFreq_osr,
@@ -361,8 +362,10 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
        mon_cfg.freq_osr / 2) /
       3000; // Scale by bandwidth relative to the original 3 kHz
   candidate_t candidate_list[candidate_size];
-  int num_candidates = ft8_find_sync(&mon.wf, candidate_size, candidate_list, kMin_score);
-  //LOG(LOG_DEBUG, "Candidates = %d (of %d)\n", num_candidates, candidate_size);
+  int num_candidates =
+      ft8_find_sync(&mon.wf, candidate_size, candidate_list, kMin_score);
+  // LOG(LOG_DEBUG, "Candidates = %d (of %d)\n", num_candidates,
+  // candidate_size);
 
   // Hash table for decoded messages (to check for duplicates)
   int num_decoded = 0;
@@ -448,12 +451,7 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
         mcompare);
   // Empty entries sorted to top, so first num_decoded elements of
   // decoded_hashtable are valid
-  double tbase = tmp->tm_sec; // Full seconds and fraction in minute, should be
-                              // just above (not below) period multiple
-  tbase = is_ft8 ? fmod(tbase, 15.0)
-                 : fmod(tbase+1, 7.5)-1; // seconds after start of cycle (0/15/30/45
-                                     // or 0/7.5/15/etc)
-  tbase += sec; // sec could be negative, so add it only now
+  double tbase = sec;
 
   for (int i = 0; i < num_decoded; i++) {
     message_t const *mp = decoded_hashtable[i];
@@ -466,30 +464,33 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
     int n_sym = FT8_NN;
     float sym_period = FT8_SYMBOL_PERIOD;
     float sym_bt = 2.0f; // GFSK BT for FT8 (matches gen_ft8.c)
-    if (refine_signal_params(signal, num_samples, sample_rate,
-                             mp->bits, mp->text,
-                             mp->freq_hz, mp->time_sec,
-                             n_sym, sym_period, sym_bt,
-                             &report) == 0) {
-      /* Refined absolute TOA: slot boundary + filename offset + sample position */
+    LOG(LOG_INFO,
+        "decode_ft8: refining %s at coarse_freq=%.2f, coarse_time=%.3f\n",
+        mp->text, mp->freq_hz, mp->time_sec);
+    if (refine_signal_params(signal, num_samples, sample_rate, mp->bits,
+                             mp->text, mp->freq_hz, mp->time_sec, n_sym,
+                             sym_period, sym_bt, &report) == 0) {
+      /* Refined absolute TOA: slot boundary + filename offset + sample position
+       */
       double abs_toa_s = tbase + report.toa_ms / 1000.0;
+      double coarse_abs_toa_s = tbase + mp->time_sec;
       fprintf(stdout,
-              "%4d/%02d/%02d %02d:%02d:%02d %3d %+.6lf %'.1lf ~ %s  "
-              "#%s  [ABS_TOA=%+.6lf FINE=%.2fHz SNR=%.1f CONF=%.2f]\n",
-              tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday,
-              tmp->tm_hour, tmp->tm_min, tmp->tm_sec,
-              mp->score, abs_toa_s,
+              "%4d/%02d/%02d %02d:%02d:%02d %3d %+.6lf %'.1lf ~ %-18s  "
+              "#%s  [ABS_TOA=%+.6lf COARSE=%+.6lf FINE=%.2fHz SNR=%.1f "
+              "CONF=%.2f]\n",
+              tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour,
+              tmp->tm_min, tmp->tm_sec, mp->score, abs_toa_s,
               1.0e6 * base_freq + mp->freq_hz, mp->text,
-              hexify(hexbuffer, mp->bits, sizeof(mp->bits)),
-              abs_toa_s, report.freq_hz, report.snr_refined, report.sync_confidence);
+              hexify(hexbuffer, mp->bits, sizeof(mp->bits)), abs_toa_s,
+              coarse_abs_toa_s, report.freq_hz, report.snr_refined,
+              report.sync_confidence);
 
     } else {
 #endif
       fprintf(stdout,
               "%4d/%02d/%02d %02d:%02d:%02d %3d %+4.2lf %'.1lf ~ %s  #%s\n",
-              tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday,
-              tmp->tm_hour, tmp->tm_min, tmp->tm_sec,
-              mp->score, tbase + mp->time_sec,
+              tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour,
+              tmp->tm_min, tmp->tm_sec, mp->score, tbase + mp->time_sec,
               1.0e6 * base_freq + mp->freq_hz, mp->text,
               hexify(hexbuffer, mp->bits, sizeof(mp->bits)));
 #ifndef USE_KISS

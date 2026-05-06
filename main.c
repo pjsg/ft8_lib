@@ -35,7 +35,7 @@
 #include "common/wave.h"
 #include "common/debug.h"
 
-#define LOG_LEVEL LOG_FATAL
+#define LOG_LEVEL LOG_INFO
 
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__)
   // The great thing about standards...
@@ -112,6 +112,7 @@ int main(int argc, char *argv[]){
   {
     char *loc = getenv("LANG");
     setlocale(LC_ALL,loc); // To get commas in long numerical strings
+    setlocale(LC_NUMERIC,"C"); // But keep floats consistent for parsing
   }
   if(argc <= optind){
     usage();
@@ -614,7 +615,7 @@ int process_file(char const * const path, bool is_ft8, double base_freq){
       char *npath = strdup(path);
       char const *bn = basename(npath);
       int year,mon,day,hr,minute,sec;
-      double fsec_from_name = 0;
+      double fsec_from_name = 0.0;
       char junk;
       int r = sscanf(bn,"%04d%02d%02d%c%02d%02d%02d%lf",&year,&mon,&day,&junk,&hr,&minute,&sec,&fsec_from_name);
       if(r < 7) {
