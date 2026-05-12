@@ -34,6 +34,9 @@ decode_ft8_kiss: main.o decode_ft8_kiss.o ft8/decode.o ft8/encode.o ft8/crc.o ft
 decode_ft8_kiss.o: decode_ft8.c
 	$(CC) -c -o $@ $(CFLAGS) $(CCFLAGS) -DUSE_KISS $^
 
+correlate: correlate.c ft8/pack.o refine.o ft8/text.o ft8/encode.o ft8/crc.o ft8/constants.o common/wave.o ft8/ldpc.o ft8/decode.c
+	cc -O3 -I. correlate.c ft8/pack.o refine.o ft8/text.o ft8/encode.o ft8/crc.o ft8/constants.o common/wave.o ft8/decode.o ft8/ldpc.o -lm -flto $(shell pkg-config --libs fftw3f) -o correlate
+
 clean:
 	rm -f *.o *.a ft8/*.o common/*.o fft/*.o $(TARGETS)
 install:

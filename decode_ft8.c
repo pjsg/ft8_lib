@@ -476,13 +476,13 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
       double coarse_abs_toa_s = tbase + mp->time_sec;
       fprintf(stdout,
               "%4d/%02d/%02d %02d:%02d:%02d %3d %+.6lf %'.1lf ~ %-18s  "
-              "#%s  [ABS_TOA=%+.6lf COARSE=%+.6lf FINE=%.2fHz SNR=%.1f "
+              "#%s  [ABS_TOA=%+.6lf COARSE_TOA=%+.6lf COARSE_F=%.2fHz FINE=%.2fHz SNR=%.1f "
               "CONF=%.2f]\n",
               tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour,
               tmp->tm_min, tmp->tm_sec, mp->score, abs_toa_s,
               1.0e6 * base_freq + mp->freq_hz, mp->text,
               hexify(hexbuffer, mp->bits, sizeof(mp->bits)), abs_toa_s,
-              coarse_abs_toa_s, report.freq_hz, report.snr_refined,
+              coarse_abs_toa_s, mp->freq_hz, report.freq_hz, report.snr_refined,
               report.sync_confidence);
 
     } else {

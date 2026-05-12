@@ -51,6 +51,7 @@ extern int kFreq_osr;
 int Verbose = 0;
 bool NoDelete; // Don't delete input file after decoding
 bool Run_queue = false; // When true, exit after running queue (suitable for calling from cron)
+bool Trace = false; // Enable tracing output
 #define SORT_SIZE (8192) // Max size of file name sort list
 
 #define HSIZE 127
@@ -78,8 +79,11 @@ int main(int argc, char *argv[]){
   double base_freq = 0;
   int nprocs = 1;
   int c;
-  while((c = getopt(argc,argv,"48f:vnrT:F:p:")) != -1){
+  while((c = getopt(argc,argv,"48f:vnrT:F:p:t")) != -1){
     switch(c){
+    case 't':
+      Trace = true;
+      break;
     case 'r':
       Run_queue = true;
       break;
@@ -796,5 +800,5 @@ done:;
 
 void usage()
 {
-  fprintf(stderr, "decode_ft8 [-F sub] [-T sub] [-p nprocs] [-v] [-8|-4] [-d] [-f basefreq] file_or_directory\n");
+  fprintf(stderr, "decode_ft8 [-F sub] [-T sub] [-p nprocs] [-v] [-8|-4] [-d] [-f basefreq] [-t] file_or_directory\n");
 }
