@@ -3,3 +3,5 @@ gen_ft8
 decode_ft8
 test
 libft8.a
+*.png
+*.jsonl
