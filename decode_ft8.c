@@ -386,9 +386,8 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
         (cand->freq_offset + (float)cand->freq_sub / mon.wf.freq_osr) /
         mon.symbol_period;
     float const time_sec =
-        (cand->time_offset + (float)cand->time_sub / mon.wf.time_osr +
-         1.0f / mon.wf.time_osr - (float)mon.wf.freq_osr / 2.0f - 0.5f) *
-        mon.symbol_period;
+        (cand->time_offset + (float)cand->time_sub / mon.wf.time_osr) *
+        mon.symbol_period - 0.1515f; // Calibrate to match raw sample coordinates
 
     message_t message = {0};      // Written by ft8_decode()
     decode_status_t status = {0}; // ditto

@@ -195,8 +195,9 @@ int main(int argc, char **argv) {
             int n_start = (int)(round(t_offset * sample_rate));
 
             for (int block = 0; block < 3; block++) {
-                int b_start = (block == 0) ? 0 : (block == 1) ? 26 : 52;
-                int b_end   = (block == 0) ? 26 : (block == 1) ? 52 : 79;
+                // FT8 Sync symbols are at 0-6, 36-42, 72-78
+                int b_start = (block == 0) ? 0 : (block == 1) ? 36 : 72;
+                int b_end   = b_start + 7;
                 
                 double block_re = 0;
                 double block_im = 0;
@@ -216,7 +217,7 @@ int main(int argc, char **argv) {
             }
 
             if (total_samples > 0) {
-                double mag = total_mag / 3.0; // Average magnitude across 3 blocks
+                double mag = total_mag / 3.0; // Average magnitude across weighted sync blocks
                 fprintf(out_f, "{\"time\": %.6f, \"frequency\": %.3f, \"value\": %.6e}\n", t_offset, f_base, mag);
                 if (mag > best_mag) {
                     best_mag = mag;
@@ -248,30 +249,30 @@ int main(int argc, char **argv) {
             // Audit: Check Refined coordinates with Simple math
             double r_t = report.toa_ms / 1000.0;
             double r_f = report.freq_hz;
-            float *r_re = malloc(n_wave * sizeof(float));
-            float *r_im = malloc(n_wave * sizeof(float));
-            make_gfsk_tpl(tones, FT8_NN, (float)r_f, 2.0f, FT8_SYMBOL_PERIOD, (int)sample_rate, r_re, r_im);
-            
-            double audit_mag = 0;
-            int audit_n = (int)(round(r_t * sample_rate));
+            float *r_tpl_re = malloc(n_wave * sizeof(float));
+            float *r_tpl_im = malloc(n_wave * sizeof(float));
+            make_gfsk_tpl(tones, FT8_NN, (float)r_f, 2.0f, FT8_SYMBOL_PERIOD, (int)sample_rate, r_tpl_re, r_tpl_im);
+
+            double r_mag_total = 0;
+            int r_start = (int)(round(r_t * sample_rate));
             for (int block = 0; block < 3; block++) {
                 int b_start = (block == 0) ? 0 : (block == 1) ? 26 : 52;
-                int b_end   = (block == 0) ? 26 : (block == 1) ? 52 : 79;
+                int b_end   = b_start + 7;
                 double br = 0, bi = 0, be = 0;
                 for (int i = b_start * n_spsym; i < b_end * n_spsym; i++) {
-                    int idx = audit_n + i;
-                    if (idx >= 0 && idx < num_samples) {
-                        br += (double)signal[idx] * (double)r_re[i];
-                        bi += (double)signal[idx] * (double)r_im[i];
-                        be += (double)r_re[i] * (double)r_re[i] + (double)r_im[i] * (double)r_im[i];
-                    }
+                    int idx = r_start + i;
+                    if (idx < 0 || idx >= num_samples) continue;
+                    br += (double)signal[idx] * (double)r_tpl_re[i];
+                    bi += (double)signal[idx] * (double)r_tpl_im[i];
+                    be += (double)r_tpl_re[i] * (double)r_tpl_re[i] + (double)r_tpl_im[i] * (double)r_tpl_im[i];
                 }
-                if (be > 0) audit_mag += sqrt((br*br + bi*bi)/be);
+                if (be > 0) r_mag_total += sqrt((br * br + bi * bi) / be);
             }
+            double r_mag = r_mag_total / 3.0;
             printf("\nAudit Results:\n");
             printf("Simple Mag at Simple Peak:  %e\n", best_mag);
-            printf("Simple Mag at Refined Peak: %e\n", audit_mag / 3.0);
-            free(r_re); free(r_im);
+            printf("Simple Mag at Refined Peak: %e\n", r_mag);
+            free(r_tpl_re); free(r_tpl_im);
         } else {
             fprintf(stderr, "Error: refine_signal_params failed.\n");
         }

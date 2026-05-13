@@ -7,7 +7,7 @@ CPPFLAGS = -std=c11 -I. $(shell pkg-config --cflags fftw3f)
 LDFLAGS = -lm -flto $(shell pkg-config --libs fftw3f)
 LDFLAGS_KISS = -lm -flto 
 
-TARGETS = gen_ft8 decode_ft8 test test_refine decode_ft8_kiss
+TARGETS = gen_ft8 decode_ft8 test test_refine decode_ft8_kiss correlate
 
 .PHONY: run_tests all clean
 
