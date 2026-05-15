@@ -2,10 +2,12 @@
 # By default, this builds both a decode_ft8 (using FFTW3) and decode_ft8_kiss (using the KISS library)
 # It is only the decode_ft8.c file that depends on the USE_KISS define.
 
-CFLAGS = -O3 -ggdb3 -march=native -flto -ffast-math 
+CFLAGS_NOLTO = -O3 -march=native -ffast-math 
+CFLAGS = $(CFLAGS_NOLTO) -flto -g
 CPPFLAGS = -std=c11 -I. $(shell pkg-config --cflags fftw3f)
-LDFLAGS = -lm -flto $(shell pkg-config --libs fftw3f)
+LDFLAGS = -lm -flto $(shell pkg-config --libs fftw3f) -g
 LDFLAGS_KISS = -lm -flto 
+CC = gcc
 
 TARGETS = gen_ft8 decode_ft8 test test_refine decode_ft8_kiss correlate
 
@@ -16,14 +18,17 @@ all: $(TARGETS)
 run_tests: test
 	@./test
 
+%.s: %.c
+	$(CC) $(CFLAGS_NOLTO) -S $< -o $@
+
 gen_ft8: gen_ft8.o ft8/constants.o ft8/text.o ft8/pack.o ft8/encode.o ft8/crc.o common/wave.o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
 test:  test.o ft8/pack.o ft8/encode.o ft8/crc.o ft8/text.o ft8/constants.o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
-decode_ft8: main.o decode_ft8.o refine.o ft8/decode.o ft8/encode.o ft8/crc.o ft8/ldpc.o ft8/unpack.o ft8/text.o ft8/constants.o common/wave.o
-	$(CC) -o $@ $^ $(LDFLAGS)
+decode_ft8: main.c decode_ft8.o refine.o ft8/decode.o ft8/encode.o ft8/crc.o ft8/ldpc.o ft8/unpack.o ft8/text.o ft8/constants.o common/wave.o
+	$(CC) -g -o $@ $^ $(LDFLAGS)
 
 test_refine: test_refine.o refine.o ft8/pack.o ft8/encode.o ft8/crc.o ft8/text.o ft8/constants.o common/wave.o fft/kiss_fft.o
 	$(CC) -o $@ $^ $(LDFLAGS)
@@ -35,7 +40,7 @@ decode_ft8_kiss.o: decode_ft8.c
 	$(CC) -c -o $@ $(CFLAGS) $(CCFLAGS) -DUSE_KISS $^
 
 correlate: correlate.c ft8/pack.o refine.o ft8/text.o ft8/encode.o ft8/crc.o ft8/constants.o common/wave.o ft8/ldpc.o ft8/decode.c
-	cc -O3 -I. correlate.c ft8/pack.o refine.o ft8/text.o ft8/encode.o ft8/crc.o ft8/constants.o common/wave.o ft8/decode.o ft8/ldpc.o -lm -flto $(shell pkg-config --libs fftw3f) -o correlate
+	$(CC) -g -O3 -I. correlate.c ft8/pack.o refine.o ft8/text.o ft8/encode.o ft8/crc.o ft8/constants.o common/wave.o ft8/decode.o ft8/ldpc.o -lm -flto $(shell pkg-config --libs fftw3f) -o correlate
 
 clean:
 	rm -f *.o *.a ft8/*.o common/*.o fft/*.o $(TARGETS)
