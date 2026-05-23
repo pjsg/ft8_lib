@@ -463,11 +463,11 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
     int n_sym = FT8_NN;
     float sym_period = FT8_SYMBOL_PERIOD;
     float sym_bt = 2.0f; // GFSK BT for FT8 (matches gen_ft8.c)
-    LOG(LOG_INFO,
+    LOG(LOG_DEBUG,
         "decode_ft8: refining %s at coarse_freq=%.2f, coarse_time=%.3f\n",
         mp->text, mp->freq_hz, mp->time_sec);
     if (refine_signal_params(signal, num_samples, sample_rate, mp->bits,
-                             mp->text, mp->freq_hz, mp->time_sec, n_sym,
+                             mp->text, (double)mp->freq_hz, (double)mp->time_sec, n_sym,
                              sym_period, sym_bt, &report) == 0) {
       /* Refined absolute TOA: slot boundary + filename offset + sample position
        */
@@ -475,7 +475,7 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
       double coarse_abs_toa_s = tbase + mp->time_sec;
       fprintf(stdout,
               "%4d/%02d/%02d %02d:%02d:%02d %3d %+.6lf %'.1lf ~ %-18s  "
-              "#%s  [ABS_TOA=%+.6lf COARSE_TOA=%+.6lf COARSE_F=%.2fHz FINE=%.2fHz SNR=%.1f "
+              "#%s  [ABS_TOA=%+.6lf COARSE_TOA=%+.6lf COARSE_F=%.2fHz FINE=%.3fHz SNR=%.1f "
               "CONF=%.2f]\n",
               tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour,
               tmp->tm_min, tmp->tm_sec, mp->score, abs_toa_s,

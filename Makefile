@@ -27,7 +27,7 @@ gen_ft8: gen_ft8.o ft8/constants.o ft8/text.o ft8/pack.o ft8/encode.o ft8/crc.o 
 test:  test.o ft8/pack.o ft8/encode.o ft8/crc.o ft8/text.o ft8/constants.o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
-decode_ft8: main.c decode_ft8.o refine.o ft8/decode.o ft8/encode.o ft8/crc.o ft8/ldpc.o ft8/unpack.o ft8/text.o ft8/constants.o common/wave.o
+decode_ft8: main.c decode_ft8.o refine.o ft8/decode.o ft8/encode.o ft8/crc.o ft8/ldpc.o ft8/unpack.o ft8/text.o ft8/constants.o common/wave.o brent.o
 	$(CC) -g -o $@ $^ $(LDFLAGS)
 
 test_refine: test_refine.o refine.o ft8/pack.o ft8/encode.o ft8/crc.o ft8/text.o ft8/constants.o common/wave.o fft/kiss_fft.o
@@ -39,8 +39,8 @@ decode_ft8_kiss: main.o decode_ft8_kiss.o ft8/decode.o ft8/encode.o ft8/crc.o ft
 decode_ft8_kiss.o: decode_ft8.c
 	$(CC) -c -o $@ $(CFLAGS) $(CCFLAGS) -DUSE_KISS $^
 
-correlate: correlate.c ft8/pack.o refine.o ft8/text.o ft8/encode.o ft8/crc.o ft8/constants.o common/wave.o ft8/ldpc.o ft8/decode.c
-	$(CC) -g -O3 -I. correlate.c ft8/pack.o refine.o ft8/text.o ft8/encode.o ft8/crc.o ft8/constants.o common/wave.o ft8/decode.o ft8/ldpc.o -lm -flto $(shell pkg-config --libs fftw3f) -o correlate
+correlate: correlate.c ft8/pack.o refine.o ft8/text.o ft8/encode.o ft8/crc.o ft8/constants.o common/wave.o ft8/ldpc.o ft8/decode.c brent.o
+	$(CC) -g -O3 -march=native -ffast-math -I. correlate.c ft8/pack.o refine.o brent.o ft8/text.o ft8/encode.o ft8/crc.o ft8/constants.o common/wave.o ft8/decode.o ft8/ldpc.o -lm -flto $(shell pkg-config --libs fftw3f) -o correlate
 
 clean:
 	rm -f *.o *.a ft8/*.o common/*.o fft/*.o $(TARGETS)

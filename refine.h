@@ -34,13 +34,17 @@ int refine_signal_params(const float *signal,
                          int sample_rate,
                          const uint8_t bits[10],
                          const char *text,
-                         float coarse_freq_hz,
-                         float coarse_time_sec,
+                         double coarse_freq_hz,
+                         double coarse_time_sec,
                          int n_sym,
                          float symbol_period,
                          float symbol_bt,
                          precision_report_t *report);
 
+void make_tpl_shared_double(const uint8_t *tones, int n_sym, double f0,
+                            float symbol_bt, double symbol_period,
+                            int sample_rate, double *out_re,
+                            double *out_im, double *out_tone_sum_sq);
 #ifdef __cplusplus
 }
 #endif
