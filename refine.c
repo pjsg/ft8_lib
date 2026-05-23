@@ -10,6 +10,8 @@
 
 #include <stdbool.h>
 
+#include <sys/time.h>
+
 #include "common/debug.h"
 
 #include "brent.h"
@@ -389,6 +391,113 @@ double get_mag_brent(double f, void *user_data) {
   return -best_mag;
 }
 
+#include <fftw3.h>
+#include <stdbool.h>
+#include <math.h>
+#include <stdlib.h>
+
+#include <fftw3.h>
+#include <stdbool.h>
+#include <math.h>
+#include <stdlib.h>
+
+void optimize_search_grid(const float *restrict signal, int signal_len, int sample_rate,
+                          int n_sym, float symbol_bt, double symbol_period, int n_spsym,
+                          const uint8_t *tones, double coarse_freq_hz, float coarse_time_sec,
+                          double *best_mag, double *best_f, double *best_t) {
+
+  int n_wave = 79 * n_spsym;
+  double block_tpl_e = (double)n_wave;
+
+  // 1. Allocate space for the base arrays
+  double *tpl_re = malloc(n_wave * sizeof(double));
+  double *tpl_im = malloc(n_wave * sizeof(double));
+  double *tone_sum_sq = malloc(79 * sizeof(double));
+
+  // Generate the ZERO-FREQUENCY base template exactly once
+  make_tpl_shared_double(tones, n_sym, 0.0, symbol_bt, symbol_period,
+                         sample_rate, tpl_re, tpl_im, tone_sum_sq);
+
+  // Allocate scratchpad arrays for the pure frequency rotation vectors
+  double *rot_re = malloc(n_wave * sizeof(double));
+  double *rot_im = malloc(n_wave * sizeof(double));
+
+  // 2. Pre-calculate time step array to wipe out loop overhead and rounding
+  int t_steps = 0;
+  for (float t = coarse_time_sec - 0.05f; t <= coarse_time_sec + 0.03f; t += 0.005f) t_steps++;
+
+  int *n_start_arr = malloc(t_steps * sizeof(int));
+  float *t_val_arr = malloc(t_steps * sizeof(float));
+  int t_idx = 0;
+  for (float t = coarse_time_sec - 0.05f; t <= coarse_time_sec + 0.03f; t += 0.005f) {
+    t_val_arr[t_idx] = t;
+    n_start_arr[t_idx++] = (int)round(t * sample_rate);
+  }
+
+  // 3. Brute Force Grid Search Execution
+  for (double f = coarse_freq_hz - 3.0f; f <= coarse_freq_hz + 2.5f; f += 0.15f) {
+    
+    // Precompute a flat, pure complex tone vector for frequency 'f'.
+    // Because it doesn't carry complex recursive dependencies, the compiler 
+    // can optimize and vectorize this loop layout flawlessly.
+    double omega = 2.0 * M_PI * f / (double)sample_rate;
+    #pragma omp simd
+    for (int i = 0; i < n_wave; i++) {
+      double phi = omega * (double)i;
+      rot_re[i] = cos(phi);
+      rot_im[i] = sin(phi);
+    }
+
+    // Outer Time Steps
+    for (int t_i = 0; t_i < t_steps; t_i++) {
+      int n_start = n_start_arr[t_i];
+      float t = t_val_arr[t_i];
+
+      if (n_start < 0 || n_start + n_wave >= signal_len) continue;
+
+      const float *restrict sig_ptr = &signal[n_start];
+      double block_re = 0.0;
+      double block_im = 0.0;
+
+      // The Core Cross-Correlation Loop: Fully flattened and vectorizable.
+      // It multiplies the incoming signal by the base template and 
+      // heterodyne-shifts the phase parameters simultaneously.
+      #pragma omp simd reduction(+:block_re, block_im)
+      for (int i = 0; i < n_wave; i++) {
+        double s = (double)sig_ptr[i];
+        
+        // Modulate our static zero-Hz template to frequency 'f' on the fly
+        double modulated_tpl_re = tpl_re[i] * rot_re[i] - tpl_im[i] * rot_im[i];
+        double modulated_tpl_im = tpl_re[i] * rot_im[i] + tpl_im[i] * rot_re[i];
+
+        block_re += s * modulated_tpl_re;
+        block_im += s * modulated_tpl_im;
+      }
+
+      // Finalize magnitude calculation
+      double mag = 0.0;
+      if (block_tpl_e > 0.0) {
+        mag = sqrt((block_re * block_re + block_im * block_im) / block_tpl_e);
+      }
+
+      if (mag > *best_mag) {
+        *best_mag = mag;
+        *best_f = f;
+        *best_t = t;
+      }
+    }
+  }
+
+  // 4. Memory Clean up
+  free(rot_re);
+  free(rot_im);
+  free(n_start_arr);
+  free(t_val_arr);
+  free(tpl_re);
+  free(tpl_im);
+  free(tone_sum_sq);
+}
+
 int refine_signal_params(const float *signal, int signal_len, int sample_rate,
                          const uint8_t *payload, const char *text,
                          double coarse_freq_hz, double coarse_time_sec,
@@ -414,16 +523,20 @@ int refine_signal_params(const float *signal, int signal_len, int sample_rate,
 
   /* Hierarchical Search */
 
+  struct timeval start_time, end_time;
+  gettimeofday(&start_time, NULL);
+
+#ifndef DO_OLD_COARSE_SCAN
   // 1. Frequency Scan (+/- 4Hz)
   for (double f = coarse_freq_hz - 3.0f; f <= coarse_freq_hz + 2.5f;
-       f += 0.15f) {
+        f += 0.15f) {
     make_tpl_shared_double(tones, n_sym, f, symbol_bt, symbol_period,
-                           sample_rate, tpl_re, tpl_im, tone_sum_sq);
+                            sample_rate, tpl_re, tpl_im, tone_sum_sq);
     for (float t = coarse_time_sec - 0.05f; t <= coarse_time_sec + 0.03f;
-         t += 0.005f) {
+          t += 0.005f) {
       int n_start = (int)round(t * sample_rate);
       double mag = get_mag(signal, signal_len, sample_rate, n_start, tpl_re,
-                           tpl_im, tone_sum_sq, n_spsym, false);
+                            tpl_im, tone_sum_sq, n_spsym, false);
       // printf("1: f: %f, t: %f, mag: %f\n", f, t, mag);
       if (mag > best_mag) {
         best_mag = mag;
@@ -433,7 +546,37 @@ int refine_signal_params(const float *signal, int signal_len, int sample_rate,
     }
   }
 
-#ifdef LOGIT
+  gettimeofday(&end_time, NULL);
+  double coarse_scan_time = ((end_time.tv_sec - start_time.tv_sec) * 1000.0 +
+                      (end_time.tv_usec - start_time.tv_usec) / 1000.0) / 1000.0;
+  printf("Coarse scan time: %f\n", coarse_scan_time);
+  fflush(stdout);
+
+#ifndef LOGIT
+  printf("After coarse scan: best frequency %fHz, time %f, mag %f\n", best_f,
+          best_t, best_mag);
+  fflush(stdout);
+#endif
+
+  best_f = coarse_freq_hz;
+  best_t = coarse_time_sec;
+  best_mag = -1;
+
+  gettimeofday(&start_time, NULL);
+#endif
+
+  optimize_search_grid(signal, signal_len, sample_rate, n_sym, symbol_bt,
+                        symbol_period, n_spsym, tones, coarse_freq_hz,
+                        coarse_time_sec, &best_mag, &best_f, &best_t);
+
+  gettimeofday(&end_time, NULL);
+  double optimize_time = ((end_time.tv_sec - start_time.tv_sec) * 1000.0 +
+                      (end_time.tv_usec - start_time.tv_usec) / 1000.0) / 1000.0;
+
+  printf("Optimize time: %f\n", optimize_time);
+  fflush(stdout);
+
+#ifndef LOGIT
   printf("After phase 1: best frequency %fHz, time %f, mag %f\n", best_f,
          best_t, best_mag);
   fflush(stdout);
