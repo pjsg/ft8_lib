@@ -474,7 +474,7 @@ int process_buffer(float const *signal, double sample_rate, int num_samples,
       double abs_toa_s = tbase + report.toa_ms / 1000.0;
       double coarse_abs_toa_s = tbase + mp->time_sec;
       fprintf(stdout,
-              "%4d/%02d/%02d %02d:%02d:%02d %3d %+.6lf %'.3lf ~ %-18s  "
+              "%4d/%02d/%02d %02d:%02d:%02d %3d %+.6lf %'.6lf ~ %-18s  "
               "#%s  [ABS_TOA=%+.6lf COARSE_TOA=%+.6lf COARSE_F=%.2fHz FINE=%.3fHz SNR=%.1f "
               "CONF=%.2f]\n",
               tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour,

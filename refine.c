@@ -60,7 +60,9 @@ typedef struct brent_user_data {
 static double g_sin_cos_lut[2 * LUT_SIZE];
 static int g_lut_initialized = 0;
 
-
+static double *saved_pulse;
+static int saved_n_spsym;
+static double saved_symbol_bt;
 
 /**
  * Initializes the global Sine/Cosine Lookup Table.
@@ -224,12 +226,22 @@ void make_tpl_shared_double(const uint8_t *tones, int n_sym, double f0,
   }
 
   // Precompute the Gaussian/Error Function pulse shape
-  double *pulse = malloc(3 * n_spsym * sizeof(double));
-  for (int i = 0; i < 3 * n_spsym; ++i) {
-    double t = (double)i / (double)n_spsym - 1.5;
-    pulse[i] = (erf(5.336446 * (double)symbol_bt * (t + 0.5)) -
-                erf(5.336446 * (double)symbol_bt * (t - 0.5))) /
-               2.0;
+  double *pulse = saved_pulse;
+
+  if (!pulse || n_spsym != saved_n_spsym || symbol_bt != saved_symbol_bt) {
+    if (pulse) {
+      free(pulse);
+    }
+    pulse = malloc(3 * n_spsym * sizeof(double));
+    for (int i = 0; i < 3 * n_spsym; ++i) {
+      double t = (double)i / (double)n_spsym - 1.5;
+      pulse[i] = (erf(5.336446 * (double)symbol_bt * (t + 0.5)) -
+                  erf(5.336446 * (double)symbol_bt * (t - 0.5))) /
+                2.0;
+    }
+    saved_pulse = pulse;
+    saved_n_spsym = n_spsym;
+    saved_symbol_bt = symbol_bt;
   }
 
   // Integrate data tones into phase transitions
@@ -281,7 +293,7 @@ void make_tpl_shared_double(const uint8_t *tones, int n_sym, double f0,
   // Clean up all localized temporary buffers
   free(dphi_steps);
   free(dphi);
-  free(pulse);
+  //free(pulse);
 }
 
 /* Standard GFSK Template Generator (Double Precision) */
@@ -454,17 +466,33 @@ double get_mag(const float *signal, int signal_len, double sample_rate,
     // Fast path 
     // Create a direct pointer to the slice of the signal we care about.
     // This allows the compiler to see two linear, perfectly aligned array strides.
-    const float *restrict sig_ptr = &signal[n_start];
-    
     double local_re = 0.0;
     double local_im = 0.0;
 
-    // Hinting to the compiler to unroll and vectorize this loop natively
-    #pragma omp simd reduction(+:local_re, local_im)
-    for (int i = 0; i < n_wave; i++) {
-      double s = (double)sig_ptr[i];
-      local_re += s * tpl_re[i];
-      local_im += s * tpl_im[i];
+    if (n_start < 0) {
+      const float *restrict sig_ptr = signal;
+      
+      // Hinting to the compiler to unroll and vectorize this loop natively
+      int i_limit = n_wave + n_start;
+      #pragma omp simd reduction(+:local_re, local_im)
+      for (int i = 0; i < i_limit; i++) {
+        local_re += (double)signal[i] * tpl_re[i - n_start];
+        local_im += (double)signal[i] * tpl_im[i - n_start];
+      }
+    } else {
+      const float *restrict sig_ptr = &signal[n_start];
+      
+      // Hinting to the compiler to unroll and vectorize this loop natively
+      int i_limit = n_wave;
+      if (i_limit + n_start >= signal_len) {
+        i_limit = signal_len - n_start;
+      }
+      #pragma omp simd reduction(+:local_re, local_im)
+      for (int i = 0; i < i_limit; i++) {
+        double s = (double)sig_ptr[i];
+        local_re += s * tpl_re[i];
+        local_im += s * tpl_im[i];
+      }
     }
     
     block_re = local_re;
