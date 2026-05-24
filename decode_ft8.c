@@ -326,12 +326,12 @@ static char *hexify(char *buff, const uint8_t *bits, size_t len) {
 // Process a buffer already loaded from a file
 // Pass precise time of signal[0] (including fractional second) so we can
 // reference to it
-int process_buffer(float const *signal, int sample_rate, int num_samples,
-                   bool is_ft8, float base_freq, struct tm const *tmp,
+int process_buffer(float const *signal, double sample_rate, int num_samples,
+                   bool is_ft8, double base_freq, struct tm const *tmp,
                    double sec) {
   assert(signal != NULL && tmp != NULL);
 
-  LOG(LOG_INFO, "Sample rate %d Hz, %d samples, %.3f seconds\n", sample_rate,
+  LOG(LOG_INFO, "Sample rate %f Hz, %d samples, %.3f seconds\n", sample_rate,
       num_samples, (double)num_samples / sample_rate);
 
   // Compute FFT over the whole signal and store it
@@ -474,12 +474,12 @@ int process_buffer(float const *signal, int sample_rate, int num_samples,
       double abs_toa_s = tbase + report.toa_ms / 1000.0;
       double coarse_abs_toa_s = tbase + mp->time_sec;
       fprintf(stdout,
-              "%4d/%02d/%02d %02d:%02d:%02d %3d %+.6lf %'.1lf ~ %-18s  "
+              "%4d/%02d/%02d %02d:%02d:%02d %3d %+.6lf %'.3lf ~ %-18s  "
               "#%s  [ABS_TOA=%+.6lf COARSE_TOA=%+.6lf COARSE_F=%.2fHz FINE=%.3fHz SNR=%.1f "
               "CONF=%.2f]\n",
               tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour,
               tmp->tm_min, tmp->tm_sec, mp->score, abs_toa_s,
-              1.0e6 * base_freq + mp->freq_hz, mp->text,
+              1.0e6 * base_freq + report.freq_hz, mp->text,
               hexify(hexbuffer, mp->bits, sizeof(mp->bits)), abs_toa_s,
               coarse_abs_toa_s, mp->freq_hz, report.freq_hz, report.snr_refined,
               report.sync_confidence);

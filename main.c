@@ -508,7 +508,7 @@ int process_file(char const * const path, bool is_ft8, double base_freq){
     return 1;
   }
 
-  int sample_rate = 0; // These get overwritten by load_wav
+  double sample_rate = 0; // These get overwritten by load_wav
   int num_samples = 0;
   float *signal = NULL; // now allocated by load_wav, must free if we ever loop
 
@@ -518,7 +518,7 @@ int process_file(char const * const path, bool is_ft8, double base_freq){
   flock(fd,LOCK_UN);
   close(fd); // remove the lock file later, after possible file removal
   if(Verbose)
-    fprintf(stderr,"decode %s: %d samples, sample rate %d Hz\n", path, num_samples, sample_rate);
+    fprintf(stderr,"decode %s: %d samples, sample rate %f Hz\n", path, num_samples, sample_rate);
 
   if (rc < 0 || num_samples < (is_ft8 ? 12.64 : 4.48 ) * sample_rate){
     struct stat statbuf = {0};

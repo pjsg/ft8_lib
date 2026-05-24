@@ -163,7 +163,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Error: Could not open WAV file %s\n", wav_path);
     return 1;
   }
-  if (load_wav(&signal, &num_samples, &int_sample_rate, wav_path, wav_fd) !=
+  if (load_wav(&signal, &num_samples, &sample_rate, wav_path, wav_fd) !=
       0) {
     fprintf(stderr, "Error: Could not read WAV file %s\n", wav_path);
     close(wav_fd);
@@ -172,7 +172,6 @@ int main(int argc, char **argv) {
   close(wav_fd);
   printf("Signal loaded: %d samples. First 5: %f %f %f %f %f\n", num_samples,
          signal[0], signal[1], signal[2], signal[3], signal[4]);
-  sample_rate = (double)int_sample_rate;
   if (override_sample_rate > 0)
     sample_rate = (double)override_sample_rate;
 
@@ -326,7 +325,7 @@ int main(int argc, char **argv) {
     struct timeval start_time, end_time;
     gettimeofday(&start_time, NULL);
 
-    if (refine_signal_params(signal, num_samples, (int)sample_rate, payload,
+    if (refine_signal_params(signal, num_samples, sample_rate, payload,
                              message_text, (float)best_f, (float)best_t, n_sym,
                              sym_period, sym_bt, &report) == 0) {
       gettimeofday(&end_time, NULL);

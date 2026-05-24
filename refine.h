@@ -25,13 +25,13 @@ float *refine_generate_template(const uint8_t bits[10],
                                 float symbol_period,
                                 float symbol_bt,
                                 float freq_hz,
-                                int sample_rate);
+                                double sample_rate);
 
 /// Refine TOA and FOA for one decoded message using matched filtering.
 /// Returns 0 on success, -1 on error.
 int refine_signal_params(const float *signal,
                          int signal_len,
-                         int sample_rate,
+                         double sample_rate,
                          const uint8_t bits[10],
                          const char *text,
                          double coarse_freq_hz,
@@ -43,7 +43,7 @@ int refine_signal_params(const float *signal,
 
 void make_tpl_shared_double(const uint8_t *tones, int n_sym, double f0,
                             float symbol_bt, double symbol_period,
-                            int sample_rate, double *out_re,
+                            double sample_rate, double *out_re,
                             double *out_im, double *out_tone_sum_sq);
 #ifdef __cplusplus
 }

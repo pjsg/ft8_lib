@@ -23,7 +23,7 @@
 typedef struct brent_user_data {
   const float *signal;
   int signal_len;
-  int sample_rate;
+  double sample_rate;
   const uint8_t *tones;
   int n_sym;
   float symbol_period;
@@ -60,6 +60,8 @@ typedef struct brent_user_data {
 static double g_sin_cos_lut[2 * LUT_SIZE];
 static int g_lut_initialized = 0;
 
+
+
 /**
  * Initializes the global Sine/Cosine Lookup Table.
  * Call this ONCE at program startup.
@@ -74,6 +76,127 @@ void init_sin_cos_lut(void) {
     g_lut_initialized = 1;
 }
 
+#define GOLDEN_RATIO_RES 0.61803398874989484820
+
+/**
+ * Single-point frequency evaluator.
+ * Generates a single target frequency template on the fly and correlates it.
+ */
+static double evaluate_single_freq(const float *restrict signal, int n_start, int n_wave,
+                                   double sample_rate, double freq, 
+                                   const float *restrict base_tpl_re,
+                                   const float *restrict base_tpl_im) {
+    
+    double omega = 2.0 * M_PI * freq / (double)sample_rate;
+    float block_re = 0.0f;
+    float block_im = 0.0f;
+    const float *restrict sig_ptr = &signal[n_start];
+
+    // Fully vectorizable 3-stream loop
+    #pragma omp simd reduction(+:block_re, block_im)
+    for (int i = 0; i < n_wave; i++) {
+        double phi = omega * (double)i;
+        float c = (float)cos(phi);
+        float s = (float)sin(phi);
+
+        float mod_re = base_tpl_re[i] * c - base_tpl_im[i] * s;
+        float mod_mod_im = base_tpl_re[i] * s + base_tpl_im[i] * c;
+
+        block_re += sig_ptr[i] * mod_re;
+        block_im += sig_ptr[i] * mod_mod_im;
+    }
+
+    return sqrt(((double)block_re * block_re + (double)block_im * block_im) / (double)n_wave);
+}
+
+static double evaluate_single_freq_with_time_track(const float *restrict signal, int n_start_base, 
+                                                  int n_wave, double sample_rate, double freq, 
+                                                  const float *restrict base_tpl_re,
+                                                  const float *restrict base_tpl_im) {
+    
+    double omega = 2.0 * M_PI * freq / (double)sample_rate;
+    double max_total_mag = 0.0;
+
+    // Check a tight cluster of sample offsets (e.g., -1, 0, +1 samples)
+    // to mimic Brent's ability to latch onto the exact peak of the time ridge.
+    // If your time offset requires a wider look, expand this window (e.g., -4 to +4)
+    for (int dt = -1; dt <= 1; dt++) {
+        int n_start = n_start_base + dt;
+        const float *restrict sig_ptr = &signal[n_start];
+
+        float block_re = 0.0f;
+        float block_im = 0.0f;
+
+        #pragma omp simd reduction(+:block_re, block_im)
+        for (int i = 0; i < n_wave; i++) {
+            double phi = omega * (double)i;
+            float c = (float)cos(phi);
+            float s = (float)sin(phi);
+
+            float mod_re = base_tpl_re[i] * c - base_tpl_im[i] * s;
+            float mod_im = base_tpl_re[i] * s + base_tpl_im[i] * c;
+
+            block_re += sig_ptr[i] * mod_re;
+            block_im += sig_ptr[i] * mod_im;
+        }
+
+        double mag = sqrt(((double)block_re * block_re + (double)block_im * block_im) / (double)n_wave);
+        if (mag > max_total_mag) {
+            max_total_mag = mag;
+        }
+    }
+
+    return max_total_mag;
+}
+
+/**
+ * Squeezes the frequency down to millihertz precision using a Golden Section Search.
+ * Replaces brent_minimize for the final frequency extraction.
+ */
+double refine_frequency_to_millihertz(const float *signal, int signal_len, double sample_rate,
+                                      int n_wave, int n_start, double coarse_f, double grid_step,
+                                      const float *base_tpl_re, const float *base_tpl_im, double *best_mag) {
+    
+    // Set up the bounding bracket based on your grid size (e.g., +/- 0.15 Hz)
+    double a = coarse_f - grid_step;
+    double b = coarse_f + grid_step;
+    
+    // Determine internal probe points based on the Golden Ratio split
+    double k = GOLDEN_RATIO_RES * (b - a);
+    double x1 = b - k;
+    double x2 = a + k;
+    
+    double f1 = evaluate_single_freq_with_time_track(signal, n_start, n_wave, sample_rate, x1, base_tpl_re, base_tpl_im);
+    double f2 = evaluate_single_freq_with_time_track(signal, n_start, n_wave, sample_rate, x2, base_tpl_re, base_tpl_im);
+    
+    // 11 iterations shrinks a 0.30 Hz window down to < 0.001 Hz (millihertz accuracy)
+    for (int iter = 0; iter < 11; iter++) {
+        if (f1 > f2) {
+            b = x2;
+            x2 = x1;
+            f2 = f1;
+            k = GOLDEN_RATIO_RES * (b - a);
+            x1 = b - k;
+            f1 = evaluate_single_freq_with_time_track(signal, n_start, n_wave, sample_rate, x1, base_tpl_re, base_tpl_im);
+        } else {
+            a = x1;
+            x1 = x2;
+            f1 = f2;
+            k = GOLDEN_RATIO_RES * (b - a);
+            x2 = a + k;
+            f2 = evaluate_single_freq_with_time_track(signal, n_start, n_wave, sample_rate, x2, base_tpl_re, base_tpl_im);
+        }
+    }
+    
+    // Return the absolute center midpoint of the final sub-millihertz bracket
+    if (f1 > f2) {
+        *best_mag = f1;
+    } else {
+        *best_mag = f2;
+    }
+    return 0.5 * (a + b);
+}
+
 /**
  * Optimized GMSK-like signal generator.
  * Eliminates out_tone_sum_sq calculation loops and swaps runtime 
@@ -81,7 +204,7 @@ void init_sin_cos_lut(void) {
  */
 void make_tpl_shared_double(const uint8_t *tones, int n_sym, double f0,
                             float symbol_bt, double symbol_period,
-                            int sample_rate, double *out_re, double *out_im,
+                            double sample_rate, double *out_re, double *out_im,
                             double *out_tone_sum_sq) {
   
   // Make sure the LUT is ready just in case it wasn't initialized at startup
@@ -164,7 +287,7 @@ void make_tpl_shared_double(const uint8_t *tones, int n_sym, double f0,
 /* Standard GFSK Template Generator (Double Precision) */
 void make_tpl_shared_double_old(const uint8_t *tones, int n_sym, double f0,
                                 float symbol_bt, double symbol_period,
-                                int sample_rate, double *out_re, double *out_im,
+                                double sample_rate, double *out_re, double *out_im,
                                 double *out_tone_sum_sq) {
   int n_spsym = (int)(0.5f + sample_rate * symbol_period);
   int n_wave = n_sym * n_spsym;
@@ -210,7 +333,7 @@ void make_tpl_shared_double_old(const uint8_t *tones, int n_sym, double f0,
 
 void make_tpl_shared_double_1(const uint8_t *tones, int n_sym, double f0,
                             float symbol_bt, double symbol_period,
-                            int sample_rate, double *out_re, double *out_im,
+                            double sample_rate, double *out_re, double *out_im,
                             double *out_tone_sum_sq) {
   int n_spsym = (int)(0.5f + sample_rate * symbol_period);
   int n_wave = n_sym * n_spsym;
@@ -269,7 +392,7 @@ void make_tpl_shared_double_1(const uint8_t *tones, int n_sym, double f0,
 
 
 /* Fast Correlation Scorer (Sync-Weighted) */
-static double get_mag(const float *signal, int signal_len, int sample_rate,
+double get_mag(const float *signal, int signal_len, double sample_rate,
                       int n_start, const double *tpl_re, const double *tpl_im,
                       const double *tone_sum_sq, int n_spsym,
                       bool costas_only) {
@@ -396,12 +519,7 @@ double get_mag_brent(double f, void *user_data) {
 #include <math.h>
 #include <stdlib.h>
 
-#include <fftw3.h>
-#include <stdbool.h>
-#include <math.h>
-#include <stdlib.h>
-
-void optimize_search_grid(const float *restrict signal, int signal_len, int sample_rate,
+void optimize_search_grid(const float *restrict signal, int signal_len, double sample_rate,
                           int n_sym, float symbol_bt, double symbol_period, int n_spsym,
                           const uint8_t *tones, double coarse_freq_hz, float coarse_time_sec,
                           double *best_mag, double *best_f, double *best_t) {
@@ -409,20 +527,7 @@ void optimize_search_grid(const float *restrict signal, int signal_len, int samp
   int n_wave = 79 * n_spsym;
   double block_tpl_e = (double)n_wave;
 
-  // 1. Allocate space for the base arrays
-  double *tpl_re = malloc(n_wave * sizeof(double));
-  double *tpl_im = malloc(n_wave * sizeof(double));
-  double *tone_sum_sq = malloc(79 * sizeof(double));
-
-  // Generate the ZERO-FREQUENCY base template exactly once
-  make_tpl_shared_double(tones, n_sym, 0.0, symbol_bt, symbol_period,
-                         sample_rate, tpl_re, tpl_im, tone_sum_sq);
-
-  // Allocate scratchpad arrays for the pure frequency rotation vectors
-  double *rot_re = malloc(n_wave * sizeof(double));
-  double *rot_im = malloc(n_wave * sizeof(double));
-
-  // 2. Pre-calculate time step array to wipe out loop overhead and rounding
+  // 1. Pre-calculate time steps to eliminate rounding overhead
   int t_steps = 0;
   for (float t = coarse_time_sec - 0.05f; t <= coarse_time_sec + 0.03f; t += 0.005f) t_steps++;
 
@@ -434,71 +539,162 @@ void optimize_search_grid(const float *restrict signal, int signal_len, int samp
     n_start_arr[t_idx++] = (int)round(t * sample_rate);
   }
 
-  // 3. Brute Force Grid Search Execution
-  for (double f = coarse_freq_hz - 3.0f; f <= coarse_freq_hz + 2.5f; f += 0.15f) {
-    
-    // Precompute a flat, pure complex tone vector for frequency 'f'.
-    // Because it doesn't carry complex recursive dependencies, the compiler 
-    // can optimize and vectorize this loop layout flawlessly.
-    double omega = 2.0 * M_PI * f / (double)sample_rate;
+  // 2. Pre-calculate frequency candidates
+  int f_steps = 0;
+  for (double f = coarse_freq_hz - 4.0f; f <= coarse_freq_hz + 3.5f; f += 0.15f) f_steps++;
+
+  double *f_val_arr = malloc(f_steps * sizeof(double));
+  int f_c = 0;
+  for (double f = coarse_freq_hz - 4.0f; f <= coarse_freq_hz + 3.5f; f += 0.15f) {
+    f_val_arr[f_c++] = f;
+  }
+
+  // 3. PRECOMPUTATION STRATEGY: 
+  // Generate the actual full templates for every frequency upfront.
+  // This takes ALL template creation math out of the search grid loops entirely.
+  float **mod_tpl_re = malloc(f_steps * sizeof(float*));
+  float **mod_tpl_im = malloc(f_steps * sizeof(float*));
+  
+  double *tpl_re_d = malloc(n_wave * sizeof(double));
+  double *tpl_im_d = malloc(n_wave * sizeof(double));
+  double *tone_sum_sq = malloc(79 * sizeof(double));
+
+  for (int f_i = 0; f_i < f_steps; f_i++) {
+    mod_tpl_re[f_i] = malloc(n_wave * sizeof(float));
+    mod_tpl_im[f_i] = malloc(n_wave * sizeof(float));
+
+    // Generate the raw template at the target frequency
+    make_tpl_shared_double(tones, n_sym, f_val_arr[f_i], symbol_bt, symbol_period,
+                           sample_rate, tpl_re_d, tpl_im_d, tone_sum_sq);
+
+    // Cast straight to a sequential float buffer for maximum SIMD throughput
     #pragma omp simd
     for (int i = 0; i < n_wave; i++) {
-      double phi = omega * (double)i;
-      rot_re[i] = cos(phi);
-      rot_im[i] = sin(phi);
+      mod_tpl_re[f_i][i] = (float)tpl_re_d[i];
+      mod_tpl_im[f_i][i] = (float)tpl_im_d[i];
     }
+  }
+  free(tpl_re_d);
+  free(tpl_im_d);
+  free(tone_sum_sq);
 
-    // Outer Time Steps
-    for (int t_i = 0; t_i < t_steps; t_i++) {
-      int n_start = n_start_arr[t_i];
-      float t = t_val_arr[t_i];
+  // --- Initialize tracking variables before the loops ---
+  int best_f_index = -1;
+  int t_i_winner = -1;
 
-      if (n_start < 0 || n_start + n_wave >= signal_len) continue;
+  // 4. MAIN CROSS-CORRELATION GRID (Time -> Frequency -> Lean Dot Product)
+  for (int t_i = 0; t_i < t_steps; t_i++) {
+    int n_start = n_start_arr[t_i];
+    float t = t_val_arr[t_i];
 
-      const float *restrict sig_ptr = &signal[n_start];
-      double block_re = 0.0;
-      double block_im = 0.0;
+    if (n_start < 0 || n_start + n_wave >= signal_len) continue;
 
-      // The Core Cross-Correlation Loop: Fully flattened and vectorizable.
-      // It multiplies the incoming signal by the base template and 
-      // heterodyne-shifts the phase parameters simultaneously.
+    const float *restrict sig_ptr = &signal[n_start];
+
+    for (int f_i = 0; f_i < f_steps; f_i++) {
+      double f = f_val_arr[f_i];
+      
+      // Contiguous float arrays map perfectly to modern CPU L1 caches
+      const float *restrict t_re = mod_tpl_re[f_i];
+      const float *restrict t_im = mod_tpl_im[f_i];
+
+      float block_re = 0.0f;
+      float block_im = 0.0f;
+
+      // ULTRALIGHT HOT LOOP: 
+      // Only 3 data streams are active. This is 100% vectorizable and cleanly 
+      // fits into the CPU's high-speed data registers.
       #pragma omp simd reduction(+:block_re, block_im)
       for (int i = 0; i < n_wave; i++) {
-        double s = (double)sig_ptr[i];
-        
-        // Modulate our static zero-Hz template to frequency 'f' on the fly
-        double modulated_tpl_re = tpl_re[i] * rot_re[i] - tpl_im[i] * rot_im[i];
-        double modulated_tpl_im = tpl_re[i] * rot_im[i] + tpl_im[i] * rot_re[i];
-
-        block_re += s * modulated_tpl_re;
-        block_im += s * modulated_tpl_im;
+        float s = sig_ptr[i];
+        block_re += s * t_re[i];
+        block_im += s * t_im[i];
       }
 
-      // Finalize magnitude calculation
-      double mag = 0.0;
-      if (block_tpl_e > 0.0) {
-        mag = sqrt((block_re * block_re + block_im * block_im) / block_tpl_e);
-      }
+      double mag = sqrt(((double)block_re * block_re + (double)block_im * block_im) / block_tpl_e);
 
       if (mag > *best_mag) {
         *best_mag = mag;
         *best_f = f;
         *best_t = t;
+        // Capture the index locations of the current winner
+        best_f_index = f_i;
+        t_i_winner = t_i;
       }
     }
   }
 
-  // 4. Memory Clean up
-  free(rot_re);
-  free(rot_im);
+  // Ensure the winning frequency isn't on the absolute edge of your search limits
+  if (best_f_index > 0 && best_f_index < f_steps - 1) {
+#ifdef LOGIT
+    printf("Interpolating frequency\n");
+    fflush(stdout);
+#endif    
+    // 1. Run a lightweight evaluation for the left and right neighbors 
+    // at the winning time step (t_i_winner) to get y1 and y3.
+    const float *restrict sig_ptr = &signal[n_start_arr[t_i_winner]];
+    
+    // Left Neighbor
+    float b_re1 = 0.0f, b_im1 = 0.0f;
+    const float *restrict t_re1 = mod_tpl_re[best_f_index - 1];
+    const float *restrict t_im1 = mod_tpl_im[best_f_index - 1];
+    #pragma omp simd reduction(+:b_re1, b_im1)
+    for (int i = 0; i < n_wave; i++) {
+      b_re1 += sig_ptr[i] * t_re1[i];
+      b_im1 += sig_ptr[i] * t_im1[i];
+    }
+    double y1 = sqrt(((double)b_re1*b_re1 + (double)b_im1*b_im1) / block_tpl_e);
+
+    // Center Winner (We already know this value)
+    double y2 = *best_mag; 
+
+    // Right Neighbor
+    float b_re3 = 0.0f, b_im3 = 0.0f;
+    const float *restrict t_re3 = mod_tpl_re[best_f_index + 1];
+    const float *restrict t_im3 = mod_tpl_im[best_f_index + 1];
+    #pragma omp simd reduction(+:b_re3, b_im3)
+    for (int i = 0; i < n_wave; i++) {
+      b_re3 += sig_ptr[i] * t_re3[i];
+      b_im3 += sig_ptr[i] * t_im3[i];
+    }
+    double y3 = sqrt(((double)b_re3*b_re3 + (double)b_im3*b_im3) / block_tpl_e);
+
+    // 2. Apply Parabolic Interpolation Formula
+    double denominator = y1 - (2.0 * y2) + y3;
+#ifdef LOGIT
+    printf("y1 = %f, y2 = %f, y3 = %f, denom = %f\n", y1, y2, y3, denominator);
+    fflush(stdout);
+#endif    
+    if (fabs(denominator) > 1e-6) {
+      double k = 0.5 * (y1 - y3) / denominator;
+      
+      // Adjust the starting frequency for Brent by the fractional step
+      double freq_step_size = 0.15; 
+      *best_f = f_val_arr[best_f_index] + (k * freq_step_size);
+      
+      // Update the magnitude estimate to reflect the predicted peak top
+      *best_mag = y2 - 0.125 * (y1 - y3) * (y1 - y3) / denominator;
+    }
+  } else {
+#ifdef LOGIT    
+    printf("Frequency not interpolated: best_f_index = %d, f_steps = %d\n", best_f_index, f_steps);
+    fflush(stdout);
+#endif    
+  }
+
+  // 5. Memory Cleanup
+  for (int f_i = 0; f_i < f_steps; f_i++) {
+    free(mod_tpl_re[f_i]);
+    free(mod_tpl_im[f_i]);
+  }
+  free(mod_tpl_re);
+  free(mod_tpl_im);
+  free(f_val_arr);
   free(n_start_arr);
   free(t_val_arr);
-  free(tpl_re);
-  free(tpl_im);
-  free(tone_sum_sq);
 }
 
-int refine_signal_params(const float *signal, int signal_len, int sample_rate,
+int refine_signal_params(const float *signal, int signal_len, double sample_rate,
                          const uint8_t *payload, const char *text,
                          double coarse_freq_hz, double coarse_time_sec,
                          int n_sym, float symbol_period, float symbol_bt,
@@ -516,7 +712,7 @@ int refine_signal_params(const float *signal, int signal_len, int sample_rate,
   double best_t = coarse_time_sec;
 
 #ifdef LOGIT
-  printf("Starting refine for '%s' at %f with time %f (sample rate: %d)\n",
+  printf("Starting refine for '%s' at %f with time %f (sample rate: %f)\n",
          text, coarse_freq_hz, coarse_time_sec, sample_rate);
   fflush(stdout);
 #endif
@@ -526,7 +722,7 @@ int refine_signal_params(const float *signal, int signal_len, int sample_rate,
   struct timeval start_time, end_time;
   gettimeofday(&start_time, NULL);
 
-#ifndef DO_OLD_COARSE_SCAN
+#ifdef DO_OLD_COARSE_SCAN
   // 1. Frequency Scan (+/- 4Hz)
   for (double f = coarse_freq_hz - 3.0f; f <= coarse_freq_hz + 2.5f;
         f += 0.15f) {
@@ -573,10 +769,12 @@ int refine_signal_params(const float *signal, int signal_len, int sample_rate,
   double optimize_time = ((end_time.tv_sec - start_time.tv_sec) * 1000.0 +
                       (end_time.tv_usec - start_time.tv_usec) / 1000.0) / 1000.0;
 
+#ifdef LOGIT
   printf("Optimize time: %f\n", optimize_time);
   fflush(stdout);
+#endif
 
-#ifndef LOGIT
+#ifdef LOGIT
   printf("After phase 1: best frequency %fHz, time %f, mag %f\n", best_f,
          best_t, best_mag);
   fflush(stdout);
@@ -597,16 +795,79 @@ int refine_signal_params(const float *signal, int signal_len, int sample_rate,
   ud.tpl_re = tpl_re;
   ud.tpl_im = tpl_im;
   ud.tone_sum_sq = tone_sum_sq;
-  ud.best_mag = best_mag;
+  ud.best_mag = 0;
+
+  gettimeofday(&start_time, NULL);
 
   double best_brent_mag =
-      -brent_minimize(best_f - 0.25, best_f, best_f + 0.25, get_mag_brent, &ud,
+      -brent_minimize(best_f - 0.075, best_f, best_f + 0.075, get_mag_brent, &ud,
                       0.001 / best_f, &best_brent_f);
 
   if (best_brent_mag < best_mag) {
-    printf("******* Brent search failed to improve on best_mag %f\n", best_mag);
+    printf("******* Brent search failed to improve on best_mag %f from %f (delta_t = %f (%f - %f))\n", 
+      best_mag, best_brent_mag, best_t - ud.best_t, best_t, ud.best_t);
     fflush(stdout);
+    ud.best_t = best_t;
+    ud.best_mag = best_mag;
+    best_brent_f = best_f;
+    best_brent_mag = best_mag;
   }
+
+  gettimeofday(&end_time, NULL);
+  double brent_time = ((end_time.tv_sec - start_time.tv_sec) * 1000.0 +
+                      (end_time.tv_usec - start_time.tv_usec) / 1000.0) / 1000.0;
+
+#ifdef LOGIT
+  printf("Brent time: %f\n", brent_time);
+  fflush(stdout);
+
+  printf("frequency updated from %fHz to %fHz by %fHz\n", best_f, best_brent_f, best_f - best_brent_f);
+  fflush(stdout);
+#endif
+
+#ifdef USE_GOLDEN_SECTION
+  // 2. Convert the winning time back into the absolute starting sample index
+  int n_start = (int)round(best_t * sample_rate);
+  int n_wave = 79 * n_spsym;
+
+  // 3. Extract the clean 0-Hz base template to feed the solver
+  float *base_tpl_re = malloc(n_wave * sizeof(float));
+  float *base_tpl_im = malloc(n_wave * sizeof(float));
+
+  gettimeofday(&start_time, NULL);
+
+  make_tpl_shared_double(tones, n_sym, 0.0f, symbol_bt, symbol_period,
+                         sample_rate, tpl_re, tpl_im, tone_sum_sq);
+  for (int i = 0; i < n_wave; i++) {
+    base_tpl_re[i] = tpl_re[i];
+    base_tpl_im[i] = tpl_im[i];
+  }
+                         
+  // ... (Populate base_tpl_re/im using make_tpl_shared_double at 0.0 Hz 
+  // and downcast to float, exactly as we did in the setup step earlier) ...
+
+  // 4. Pin down the frequency to the millihertz level instantly
+  double grid_step_size = 0.15; // Matches the step size of your coarse grid
+
+  double best_refine_mag = 0;
+  double ultra_precise_freq = refine_frequency_to_millihertz(
+      signal, signal_len, sample_rate, n_wave, n_start, 
+      best_f, grid_step_size, base_tpl_re, base_tpl_im, &best_refine_mag
+  );
+
+  // Cleanup
+  free(base_tpl_re);
+  free(base_tpl_im);
+ 
+  gettimeofday(&end_time, NULL);
+  double refine_time = ((end_time.tv_sec - start_time.tv_sec) * 1000.0 +  
+                       (end_time.tv_usec - start_time.tv_usec) / 1000.0) / 1000.0;
+  printf("Refine frequency time: %f\n", refine_time);
+  fflush(stdout);
+
+  printf("Frequency updated from %fHz to %fHz by %fHz to mag %f from %f\n", best_f, ultra_precise_freq, best_f - ultra_precise_freq, best_refine_mag, best_mag);
+  fflush(stdout);
+#endif
 
   best_mag = ud.best_mag;
   double best_brent_t = ud.best_t;

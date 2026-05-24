@@ -75,7 +75,7 @@ void save_wav(const float* signal, int num_samples, int sample_rate, const char*
 // Load signal in floating point format (-1 .. +1) as a WAVE file using 16-bit signed integers.
 // Rewritten 4 May 2025 KA9Q to be more tolerant of variant headers
 // Expects to be called with the file already open for reading on fd. path used only for error messages
-int load_wav(float **signal, int* num_samples, int* sample_rate, const char* path,int fd){
+int load_wav(float **signal, int* num_samples, double* sample_rate, const char* path,int fd){
   if(signal == NULL || num_samples == NULL || sample_rate == NULL || path == NULL)
     return -1;
 
@@ -144,6 +144,7 @@ int load_wav(float **signal, int* num_samples, int* sample_rate, const char* pat
 	fprintf(stderr,"%s: premature EOF 3\n",path);
 	goto quit;
       }
+      *sample_rate = sampleRate;
       if(chunkSize > 16){
 	// Skip the rest of the longer fmt header
 	fseek(f,chunkSize-16,SEEK_CUR); // Skip unsupported chunk
@@ -152,6 +153,15 @@ int load_wav(float **signal, int* num_samples, int* sample_rate, const char* pat
 	fprintf(stderr,"%s: numChannels %d, must be 1\n", path,numChannels);
 	goto quit;
       }
+    } else if(strncmp(chunkID,"smpl",4) == 0){
+      if (chunkSize != 8) {
+        fprintf(stderr,"%s: chunkSize %d != 8\n",path,chunkSize);
+        goto quit;
+      }
+      double sr = 0.0;
+      if(fread((void*)&sr, sizeof(sr), 1, f) != 1)
+	goto quit;
+      *sample_rate = sr;
     } else if(strncmp(chunkID,"data",4) == 0){
       // Process data
       if(chunkSize != 0xffffffff) // typical placeholder for "indeterminate"
@@ -159,7 +169,6 @@ int load_wav(float **signal, int* num_samples, int* sample_rate, const char* pat
       else
 	*num_samples = 10000000; // wing it: 10 million = 15 sec * 667 kHz
 
-      *sample_rate = sampleRate;
       if(*signal == NULL) // What if it's not null? We don't know what it is, should it be freed?
 	*signal = malloc(sizeof(float) * numChannels * *num_samples);
 
