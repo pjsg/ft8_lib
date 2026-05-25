@@ -328,7 +328,7 @@ static char *hexify(char *buff, const uint8_t *bits, size_t len) {
 // reference to it
 int process_buffer(float const *signal, double sample_rate, int num_samples,
                    bool is_ft8, double base_freq, struct tm const *tmp,
-                   double sec) {
+                   double sec, int refine_fraction) {
   assert(signal != NULL && tmp != NULL);
 
   LOG(LOG_INFO, "Sample rate %f Hz, %d samples, %.3f seconds\n", sample_rate,
@@ -464,10 +464,12 @@ int process_buffer(float const *signal, double sample_rate, int num_samples,
     int n_sym = FT8_NN;
     float sym_period = FT8_SYMBOL_PERIOD;
     float sym_bt = 2.0f; // GFSK BT for FT8 (matches gen_ft8.c)
-    LOG(LOG_DEBUG,
-        "decode_ft8: refining %s at coarse_freq=%.2f, coarse_time=%.3f\n",
-        mp->text, mp->freq_hz, mp->time_sec);
-    if (sample_rate < 25000 &&
+
+    time_t ftime = mktime((struct tm *) tmp);
+
+    int MHz = (int)(base_freq);
+    if (((MHz + (int)(ftime / 60)) % refine_fraction) == 0 &&
+        sample_rate < 25000 &&
         refine_signal_params(signal, num_samples, sample_rate, mp->bits,
                              mp->text, (double)mp->freq_hz,
                              (double)mp->time_sec, n_sym, sym_period, sym_bt,

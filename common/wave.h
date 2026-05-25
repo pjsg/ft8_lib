@@ -19,7 +19,9 @@ extern "C"
   // base_freq = radio frequency in Hz corresponding to zero frequency here (receiver is always USB)
   // tmp = UTC @ signal[0]
   // fsec = fractional second in UTC @ signal[0]
-  int process_buffer(float const *signal,double sample_rate, int num_samples, bool is_ft8, double base_freq, struct tm const *tmp, double fsec);
+  // refine_fraction = denominator of fraction by which to refine the time and frequency of decodes
+  int process_buffer(float const *signal,double sample_rate, int num_samples, bool is_ft8, 
+    double base_freq, struct tm const *tmp, double fsec, int refine_fraction);
 
 #ifdef __cplusplus
 }

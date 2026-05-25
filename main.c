@@ -52,6 +52,7 @@ int Verbose = 0;
 bool NoDelete; // Don't delete input file after decoding
 bool Run_queue = false; // When true, exit after running queue (suitable for calling from cron)
 bool Trace = false; // Enable tracing output
+int RefineFraction = 3; // How often to refine .
 #define SORT_SIZE (8192) // Max size of file name sort list
 
 #define HSIZE 127
@@ -79,7 +80,7 @@ int main(int argc, char *argv[]){
   double base_freq = 0;
   int nprocs = 1;
   int c;
-  while((c = getopt(argc,argv,"48f:vnrT:F:p:t")) != -1){
+  while((c = getopt(argc,argv,"48f:vnrT:F:p:tR:")) != -1){
     switch(c){
     case 't':
       Trace = true;
@@ -110,6 +111,9 @@ int main(int argc, char *argv[]){
       break;
     case 'p':
       nprocs = atoi(optarg);
+      break;
+    case 'R':
+      RefineFraction = atoi(optarg);
       break;
     }
   }
@@ -680,7 +684,8 @@ int process_file(char const * const path, bool is_ft8, double base_freq){
     fprintf(stderr,"%s: recording time unknown\n",path);
 
   // Do the actual decoding.
-  process_buffer(signal, sample_rate, num_samples, is_ft8, base_freq, &tmp,fsec);
+  process_buffer(signal, sample_rate, num_samples, is_ft8, base_freq, 
+    &tmp, fsec, RefineFraction);
   free(signal); // allocated by load_wav
   signal = NULL;
   fflush(stdout);
