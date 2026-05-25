@@ -387,7 +387,8 @@ int process_buffer(float const *signal, double sample_rate, int num_samples,
         mon.symbol_period;
     float const time_sec =
         (cand->time_offset + (float)cand->time_sub / mon.wf.time_osr) *
-        mon.symbol_period - 0.1515f; // Calibrate to match raw sample coordinates
+            mon.symbol_period -
+        0.1515f; // Calibrate to match raw sample coordinates
 
     message_t message = {0};      // Written by ft8_decode()
     decode_status_t status = {0}; // ditto
@@ -466,16 +467,19 @@ int process_buffer(float const *signal, double sample_rate, int num_samples,
     LOG(LOG_DEBUG,
         "decode_ft8: refining %s at coarse_freq=%.2f, coarse_time=%.3f\n",
         mp->text, mp->freq_hz, mp->time_sec);
-    if (refine_signal_params(signal, num_samples, sample_rate, mp->bits,
-                             mp->text, (double)mp->freq_hz, (double)mp->time_sec, n_sym,
-                             sym_period, sym_bt, &report) == 0) {
+    if (sample_rate < 25000 &&
+        refine_signal_params(signal, num_samples, sample_rate, mp->bits,
+                             mp->text, (double)mp->freq_hz,
+                             (double)mp->time_sec, n_sym, sym_period, sym_bt,
+                             &report) == 0) {
       /* Refined absolute TOA: slot boundary + filename offset + sample position
        */
       double abs_toa_s = tbase + report.toa_ms / 1000.0;
       double coarse_abs_toa_s = tbase + mp->time_sec;
       fprintf(stdout,
               "%4d/%02d/%02d %02d:%02d:%02d %3d %+.6lf %'.6lf ~ %-18s  "
-              "#%s  [ABS_TOA=%+.6lf COARSE_TOA=%+.6lf COARSE_F=%.2fHz FINE=%.3fHz SNR=%.1f "
+              "#%s  [ABS_TOA=%+.6lf COARSE_TOA=%+.6lf COARSE_F=%.2fHz "
+              "FINE=%.3fHz SNR=%.1f "
               "CONF=%.2f]\n",
               tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour,
               tmp->tm_min, tmp->tm_sec, mp->score, abs_toa_s,
