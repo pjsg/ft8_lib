@@ -465,7 +465,8 @@ int process_buffer(float const *signal, double sample_rate, int num_samples,
     float sym_period = FT8_SYMBOL_PERIOD;
     float sym_bt = 2.0f; // GFSK BT for FT8 (matches gen_ft8.c)
 
-    time_t ftime = mktime((struct tm *) tmp);
+    struct tm tmp_tm = *tmp;
+    time_t ftime = timegm(&tmp_tm);
 
     int MHz = (int)(base_freq);
     if (((MHz + (int)(ftime / 60)) % refine_fraction) == 0 &&
