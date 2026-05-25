@@ -831,16 +831,6 @@ int refine_signal_params(const float *signal, int signal_len, double sample_rate
       -brent_minimize(best_f - 0.075, best_f, best_f + 0.075, get_mag_brent, &ud,
                       0.001 / best_f, &best_brent_f);
 
-  if (best_brent_mag < best_mag) {
-    printf("******* Brent search failed to improve on best_mag %f from %f (delta_t = %f (%f - %f))\n", 
-      best_mag, best_brent_mag, best_t - ud.best_t, best_t, ud.best_t);
-    fflush(stdout);
-    ud.best_t = best_t;
-    ud.best_mag = best_mag;
-    best_brent_f = best_f;
-    best_brent_mag = best_mag;
-  }
-
   gettimeofday(&end_time, NULL);
   double brent_time = ((end_time.tv_sec - start_time.tv_sec) * 1000.0 +
                       (end_time.tv_usec - start_time.tv_usec) / 1000.0) / 1000.0;

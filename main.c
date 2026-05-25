@@ -52,7 +52,6 @@ int Verbose = 0;
 bool NoDelete; // Don't delete input file after decoding
 bool Run_queue = false; // When true, exit after running queue (suitable for calling from cron)
 bool Trace = false; // Enable tracing output
-int RefineFraction = 3; // How often to refine .
 #define SORT_SIZE (8192) // Max size of file name sort list
 
 #define HSIZE 127
@@ -62,7 +61,7 @@ struct wd_hashtab {
 } Wd_hashtab[HSIZE];
 
 static int has_suffix(const char *filename, const char *suffix);
-int process_file(char const *path,bool is_ft8,double base_freq); // Either file or directory (calls recursively)
+int process_file(char const *path,bool is_ft8,double base_freq, bool process_quickly); // Either file or directory (calls recursively)
 void process_directory(char const *path, bool is_ft8, double base_freq); // Directory only; called recursively
 int add_watches_recursive(int fd, const char *path);
 int scompare(void const *a, void const *b);
@@ -112,9 +111,6 @@ int main(int argc, char *argv[]){
     case 'p':
       nprocs = atoi(optarg);
       break;
-    case 'R':
-      RefineFraction = atoi(optarg);
-      break;
     }
   }
   {
@@ -135,7 +131,7 @@ int main(int argc, char *argv[]){
     }
     if((statbuf.st_mode & S_IFMT) == S_IFREG){
       // Regular file specified; process just it and quit
-      int r = process_file(path, is_ft8, base_freq);
+      int r = process_file(path, is_ft8, base_freq, false);
       exit(r);
     }
     if((statbuf.st_mode & S_IFMT) != S_IFDIR){
@@ -283,7 +279,7 @@ int main(int argc, char *argv[]){
 	    if(filecount < SORT_SIZE)
 	      file_list[filecount++] = strdup(fullname); // mallocs memory, freed after sort and process
 	    else
-	      process_file(fullname, is_ft8, base_freq); // sort table is full (unlikely) so just process it
+	      process_file(fullname, is_ft8, base_freq, filecount > 40); // sort table is full (unlikely) so just process it
 	  }
 	  break;
 	case S_IFDIR:
@@ -302,7 +298,7 @@ int main(int argc, char *argv[]){
       // and I'd rather not delay artificially
       qsort(file_list,filecount,sizeof file_list[0],scompare);
       for(int i=0; i < filecount; i++){
-	process_file(file_list[i], is_ft8, base_freq);
+	process_file(file_list[i], is_ft8, base_freq, filecount > 40);
 	free(file_list[i]);
       }
     }
@@ -423,7 +419,7 @@ void print_inotify_mask(uint32_t mask) {
 
 // Process a single audio file, delete if successful
 // Return -1 on decoding error, 0 on success, 1 if the file couldn't be found or locked
-int process_file(char const * const path, bool is_ft8, double base_freq){
+int process_file(char const * const path, bool is_ft8, double base_freq, bool process_quickly){
   if(path == NULL || strlen(path) == 0)
     return -1;
 
@@ -685,7 +681,7 @@ int process_file(char const * const path, bool is_ft8, double base_freq){
 
   // Do the actual decoding.
   process_buffer(signal, sample_rate, num_samples, is_ft8, base_freq, 
-    &tmp, fsec, RefineFraction);
+    &tmp, fsec, process_quickly);
   free(signal); // allocated by load_wav
   signal = NULL;
   fflush(stdout);
@@ -783,7 +779,7 @@ void process_directory(char const *path, bool is_ft8, double base_freq){
   dirp = NULL;
   qsort(file_list,filecount,sizeof file_list[0],scompare);
   for(int i=0; i < filecount; i++){
-    process_file(file_list[i], is_ft8, base_freq);
+    process_file(file_list[i], is_ft8, base_freq, filecount > 40);
     free(file_list[i]);
   }
   // Return to our originally scheduled program
