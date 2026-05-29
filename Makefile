@@ -3,13 +3,14 @@
 # It is only the decode_ft8.c file that depends on the USE_KISS define.
 
 SANITIZE = 
+BSD = -lbsd
 
 CFLAGS_NOLTO = -march=native -ffast-math $(SANITIZE) -O3
-CFLAGS = $(CFLAGS_NOLTO) -flto -g 
+CFLAGS = $(CFLAGS_NOLTO) -flto -g # -fprofile-use
 CPPFLAGS = -std=c11 -I. $(shell pkg-config --cflags fftw3f)
-LDFLAGS = -lm -flto $(shell pkg-config --libs fftw3f) -g $(SANITIZE)
-LDFLAGS_KISS = -lm -flto 
-CC = clang
+LDFLAGS = -lm $(shell pkg-config --libs fftw3f) $(BSD) $(CFLAGS)
+LDFLAGS_KISS = -lm -flto $(BSD)
+CC = gcc
 
 TARGETS = gen_ft8 decode_ft8 test test_refine decode_ft8_kiss correlate
 
@@ -39,10 +40,10 @@ decode_ft8_kiss: main.o decode_ft8_kiss.o ft8/decode.o ft8/encode.o ft8/crc.o ft
 	$(CC) -o $@ $^ $(LDFLAGS_KISS) 
 
 decode_ft8_kiss.o: decode_ft8.c
-	$(CC) -c -o $@ $(CFLAGS) $(CCFLAGS) -DUSE_KISS $^
+	$(CC) -c -o $@ $(CFLAGS) $(CCFLAGS) -DUSE_KISS $^ 
 
 correlate: correlate.c ft8/pack.o refine.o ft8/text.o ft8/encode.o ft8/crc.o ft8/constants.o common/wave.o ft8/ldpc.o ft8/decode.c brent.o
-	$(CC) -g -O3 -march=native -ffast-math -I. correlate.c ft8/pack.o refine.o brent.o ft8/text.o ft8/encode.o ft8/crc.o ft8/constants.o common/wave.o ft8/decode.o ft8/ldpc.o -lm -flto $(shell pkg-config --libs fftw3f) -o correlate
+	$(CC) -g -O3 -march=native -ffast-math -I. correlate.c ft8/pack.o refine.o brent.o ft8/text.o ft8/encode.o ft8/crc.o ft8/constants.o common/wave.o ft8/decode.o ft8/ldpc.o -lm -flto $(shell pkg-config --libs fftw3f) -o correlate $(BSD)
 
 clean:
 	rm -f *.o *.a ft8/*.o common/*.o fft/*.o $(TARGETS)
