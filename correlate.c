@@ -326,7 +326,7 @@ int main(int argc, char **argv) {
     gettimeofday(&start_time, NULL);
 
     if (refine_signal_params(signal, num_samples, sample_rate, payload,
-                             message_text, (float)best_f, (float)best_t, n_sym,
+                             message_text, true, (float)best_f, (float)best_t, n_sym,
                              sym_period, sym_bt, &report) == 0) {
       gettimeofday(&end_time, NULL);
       printf("\nFinal Comparison Results:\n");

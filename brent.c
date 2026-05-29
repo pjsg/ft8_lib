@@ -8,6 +8,9 @@
 double brent_minimize(double ax, double bx, double cx, cost_func_t f, void* user_data, double tol, double *xmin) {
     double a, b, d, etemp, fu, fv, fw, fx, p, q, r, tol1, tol2, u, v, w, x, xm;
     double e = 0.0; // Distance moved on the step before last
+
+    double initial_mag;
+    double initial_x;
     
     // Golden ratio constants
     const double CGOLD = 0.3819660;
@@ -16,11 +19,11 @@ double brent_minimize(double ax, double bx, double cx, cost_func_t f, void* user
     // Ensure brackets are in order
     a = (ax < cx) ? ax : cx;
     b = (ax > cx) ? ax : cx;
-    x = w = v = bx;
+    initial_x = x = w = v = bx;
     
     // Evaluate the function at the initial guess
     // user_data lets you pass state (like your raw signals or time offset) without globals
-    fw = fv = fx = f(x, user_data); 
+    initial_mag = fw = fv = fx = f(x, user_data); 
 
     for (int iter = 1; iter <= 100; iter++) { // 100 iterations max safety limit
         xm = 0.5 * (a + b);

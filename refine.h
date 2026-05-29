@@ -2,6 +2,7 @@
 #define _INCLUDE_REFINE_H_
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "ft8/constants.h"
 
 #ifdef __cplusplus
@@ -34,6 +35,7 @@ int refine_signal_params(const float *signal,
                          double sample_rate,
                          const uint8_t bits[10],
                          const char *text,
+                         bool is_ft8,
                          double coarse_freq_hz,
                          double coarse_time_sec,
                          int n_sym,

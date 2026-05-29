@@ -62,7 +62,7 @@ struct wd_hashtab {
 
 static int has_suffix(const char *filename, const char *suffix);
 int process_file(char const *path,bool is_ft8,double base_freq, bool process_quickly); // Either file or directory (calls recursively)
-void process_directory(char const *path, bool is_ft8, double base_freq); // Directory only; called recursively
+void process_directory(char const *path, bool is_ft8, double base_freq, bool force_process_slowly); // Directory only; called recursively
 int add_watches_recursive(int fd, const char *path);
 int scompare(void const *a, void const *b);
 void usage();
@@ -184,7 +184,7 @@ int main(int argc, char *argv[]){
     clock_gettime(CLOCK_REALTIME,&now);
     if(now.tv_sec >= last_poll.tv_sec + poll_interval){
       poll_interval = 1 + (random() & 31); // 1-32 seconds inclusive
-      process_directory(path, is_ft8, base_freq);
+      process_directory(path, is_ft8, base_freq, Run_queue);
       last_poll = now;
       if(Run_queue)
 	exit(0);
@@ -279,7 +279,7 @@ int main(int argc, char *argv[]){
 	    if(filecount < SORT_SIZE)
 	      file_list[filecount++] = strdup(fullname); // mallocs memory, freed after sort and process
 	    else
-	      process_file(fullname, is_ft8, base_freq, filecount > 40); // sort table is full (unlikely) so just process it
+	      process_file(fullname, is_ft8, base_freq, filecount > 40 && !force_process_slowly); // sort table is full (unlikely) so just process it
 	  }
 	  break;
 	case S_IFDIR:
@@ -298,7 +298,7 @@ int main(int argc, char *argv[]){
       // and I'd rather not delay artificially
       qsort(file_list,filecount,sizeof file_list[0],scompare);
       for(int i=0; i < filecount; i++){
-	process_file(file_list[i], is_ft8, base_freq, filecount > 40);
+	process_file(file_list[i], is_ft8, base_freq, filecount > 40 && !force_process_slowly);
 	free(file_list[i]);
       }
     }
@@ -314,7 +314,7 @@ int main(int argc, char *argv[]){
   while(true){
     // Re-scan the directory every 1-8 seconds
     // Will happen on the first loop since last_poll is in the distant past
-    process_directory(path, is_ft8, base_freq);
+    process_directory(path, is_ft8, base_freq,Run_queue);
     if(Run_queue)
       break;
     sleep(1 + (random() & 7)); // Random sleep between 1 and 8 sec; prevent synchronizing of multiple workers
@@ -720,7 +720,7 @@ int cmp_dirent(const void *a, const void *b) {
 // Recursively scan a directory and process the files inside
 // If there are "too many" entries in a directory, ignore them and
 // we'll get them when we rescan the same directory on a timer
-void process_directory(char const *path, bool is_ft8, double base_freq){
+void process_directory(char const *path, bool is_ft8, double base_freq, bool force_process_slowly){
   if(path == NULL)
     path = "."; // Default to current directory
 
@@ -764,7 +764,7 @@ void process_directory(char const *path, bool is_ft8, double base_freq){
     switch(d->d_type){
     case DT_DIR:
       if(strcmp(d->d_name,".") != 0 && strcmp(d->d_name,"..") != 0)
-	process_directory(d->d_name, is_ft8, base_freq); // Recursive call
+	process_directory(d->d_name, is_ft8, base_freq, force_process_slowly); // Recursive call
       break;
     case DT_REG:
       if(has_suffix(d->d_name,".wav") && filecount < SORT_SIZE)
@@ -779,7 +779,7 @@ void process_directory(char const *path, bool is_ft8, double base_freq){
   dirp = NULL;
   qsort(file_list,filecount,sizeof file_list[0],scompare);
   for(int i=0; i < filecount; i++){
-    process_file(file_list[i], is_ft8, base_freq, filecount > 40);
+    process_file(file_list[i], is_ft8, base_freq, filecount > 40 && !force_process_slowly);
     free(file_list[i]);
   }
   // Return to our originally scheduled program

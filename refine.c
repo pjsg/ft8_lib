@@ -37,7 +37,7 @@ typedef struct brent_user_data {
   double best_f;
   double best_t;
   double best_mag;
-
+  bool is_ft8;
 } brent_user_data_t;
 
 #include <stdio.h>
@@ -406,8 +406,9 @@ void make_tpl_shared_double_1(const uint8_t *tones, int n_sym, double f0,
 /* Fast Correlation Scorer (Sync-Weighted) */
 double get_mag(const float *signal, int signal_len, double sample_rate,
                       int n_start, const double *tpl_re, const double *tpl_im,
-                      const double *tone_sum_sq, int n_spsym,
+                      const double *tone_sum_sq, int n_spsym, bool is_ft8,
                       bool costas_only) {
+  const int num_tones = is_ft8 ? FT8_NN : FT4_NN;
   double block_re = 0, block_im = 0, block_tpl_e = 0;
   if (costas_only) {
     for (int block = 0; block < 3; block++) {
@@ -462,7 +463,7 @@ double get_mag(const float *signal, int signal_len, double sample_rate,
         block_tpl_e += tone_sum_sq[i];
       }
     } */
-    int n_wave = 79 * n_spsym;
+    int n_wave = num_tones * n_spsym;
     // Fast path 
     // Create a direct pointer to the slice of the signal we care about.
     // This allows the compiler to see two linear, perfectly aligned array strides.
@@ -524,7 +525,7 @@ double get_mag_brent(double f, void *user_data) {
     int n_start = (int)round(t * ud->sample_rate);
     double mag =
         get_mag(ud->signal, ud->signal_len, ud->sample_rate, n_start,
-                ud->tpl_re, ud->tpl_im, ud->tone_sum_sq, n_spsym, false);
+                ud->tpl_re, ud->tpl_im, ud->tone_sum_sq, n_spsym, ud->is_ft8, false);
     if (mag > best_mag) {
       best_mag = mag;
       best_t = t;
@@ -723,17 +724,22 @@ void optimize_search_grid(const float *restrict signal, int signal_len, double s
 }
 
 int refine_signal_params(const float *signal, int signal_len, double sample_rate,
-                         const uint8_t *payload, const char *text,
+                         const uint8_t *payload, const char *text, bool is_ft8,
                          double coarse_freq_hz, double coarse_time_sec,
                          int n_sym, float symbol_period, float symbol_bt,
                          precision_report_t *report) {
-  uint8_t tones[FT8_NN];
-  ft8_encode(payload, tones);
+  const int num_tones = is_ft8 ? FT8_NN : FT4_NN;
+  uint8_t tones[num_tones];
+  if (is_ft8) {
+    ft8_encode(payload, tones);
+  } else {
+    ft4_encode(payload, tones);
+  }
   int n_spsym = (int)(0.5f + sample_rate * symbol_period);
   int tpl_len = n_sym * n_spsym;
   double *tpl_re = malloc(tpl_len * sizeof(double)),
          *tpl_im = malloc(tpl_len * sizeof(double));
-  double *tone_sum_sq = malloc(79 * sizeof(double));
+  double *tone_sum_sq = malloc(num_tones * sizeof(double));
 
   double best_mag = -1.0;
   double best_f = coarse_freq_hz;
@@ -931,7 +937,7 @@ int refine_signal_params(const float *signal, int signal_len, double sample_rate
   for (float t = best_t - 0.3f; t <= best_t + 0.3f; t += 0.005f) {
     int n_start = (int)round(t * sample_rate);
     double mag = get_mag(signal, signal_len, sample_rate, n_start, tpl_re,
-                         tpl_im, tone_sum_sq, n_spsym, false);
+                         tpl_im, tone_sum_sq, n_spsym, is_ft8, false);
     sum_mag += mag;
     count++;
     // Secondary peak must be at least one symbol away to count as a "ghost"

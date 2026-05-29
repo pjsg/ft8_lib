@@ -453,22 +453,37 @@ int process_buffer(float const *signal, double sample_rate, int num_samples,
   // decoded_hashtable are valid
   double tbase = sec;
 
+  // Determine the range of frequencies decoded in the hashtable.
+  // We want to extract (say) 3.5kHz slices and search within each slice
+  // but only if the sample rate is > 25000 sps.
+  // The issue is the overhead of calling refine_signal_params(), which involves
+  // a lot of FFTs and synchronization. In particular it scales very badly if
+  // the sample rate is very high. So for high sample rates, we figure out
+  // the frequency ranges, and then do a downconversion using Fast Convolution 
+  // (based on Mark Borgerding’s Overlap-Save Multiband Filter Bank).
+
+
+
+  
+
   for (int i = 0; i < num_decoded; i++) {
     message_t const *mp = decoded_hashtable[i];
     char hexbuffer[sizeof(mp->bits) * 2 + 1];
     if (mp == NULL)
       continue; // Shouldn't happen
 
+    
 #ifndef USE_KISS
+    // this code looks specific to FT8. It needs to work for FT4 as well (based on is_ft8 variable)
     precision_report_t report = {0};
-    int n_sym = FT8_NN;
-    float sym_period = FT8_SYMBOL_PERIOD;
-    float sym_bt = 2.0f; // GFSK BT for FT8 (matches gen_ft8.c)
+    int n_sym = is_ft8 ? FT8_NN : FT4_NN;
+    float sym_period = is_ft8 ? FT8_SYMBOL_PERIOD : FT4_SYMBOL_PERIOD;
+    float sym_bt = is_ft8 ? 2.0f : 1.54f; // GFSK BT for FT8 (matches gen_ft8.c)
 
     if (!process_quickly &&
         sample_rate < 25000 &&
         refine_signal_params(signal, num_samples, sample_rate, mp->bits,
-                             mp->text, (double)mp->freq_hz,
+                             mp->text, is_ft8, (double)mp->freq_hz,
                              (double)mp->time_sec, n_sym, sym_period, sym_bt,
                              &report) == 0) {
       /* Refined absolute TOA: slot boundary + filename offset + sample position
