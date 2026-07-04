@@ -97,6 +97,24 @@ static float randn(float mean, float std)
     return mean + std * spare;
 }
 
+static int parse_json_double(const char *json, const char *key, double *val) {
+    char search[128];
+    snprintf(search, sizeof(search), "\"%s\":", key);
+    const char *p = strstr(json, search);
+    if (!p) {
+        snprintf(search, sizeof(search), "%s:", key);
+        p = strstr(json, search);
+        if (!p) return 0;
+    }
+    p += strlen(search);
+    // skip whitespace
+    while (*p == ' ' || *p == '\t') p++;
+    if (sscanf(p, "%lf", val) == 1) {
+        return 1;
+    }
+    return 0;
+}
+
 int main(void)
 {
     srand(42);
@@ -170,10 +188,11 @@ int main(void)
         while (fgets(line, sizeof(line), fp)) {
             if (strstr(line, message)) {
                 /* Parse output */
+                char *tp = strstr(line, "{");
                 double abs_toa_s, fine_freq, snr;
-                char *tp = strstr(line, "[ABS_TOA=");
-                if (tp && sscanf(tp + 9, "%lf FINE=%lfHz SNR=%lf",
-                           &abs_toa_s, &fine_freq, &snr) == 3) {
+                if (tp && parse_json_double(tp, "ABS_TOA", &abs_toa_s) &&
+                          parse_json_double(tp, "FINE", &fine_freq) &&
+                          parse_json_double(tp, "SNR", &snr)) {
                     double toa_ms = abs_toa_s * 1000.0;
                     double toa_err_ms  = toa_ms - expected_toa_ms;
                     double freq_err_hz = fine_freq - freq;
