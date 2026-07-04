@@ -70,6 +70,7 @@ void usage();
 int main(int argc, char *argv[]){
   const char* path = NULL;
   bool is_ft8 = true;
+  bool force_process_slowly = false;
 
   // Base freq; if not specified with -f in megahertz, extracted from input filename of form
   // yyyymmddThhmmssZ_ffffffff_usb.wav
@@ -79,7 +80,7 @@ int main(int argc, char *argv[]){
   double base_freq = 0;
   int nprocs = 1;
   int c;
-  while((c = getopt(argc,argv,"48f:vnrT:F:p:tR:")) != -1){
+  while((c = getopt(argc,argv,"48f:vnrT:F:p:tR:s")) != -1){
     switch(c){
     case 't':
       Trace = true;
@@ -110,6 +111,9 @@ int main(int argc, char *argv[]){
       break;
     case 'p':
       nprocs = atoi(optarg);
+      break;
+    case 's':
+      force_process_slowly = true;
       break;
     }
   }
